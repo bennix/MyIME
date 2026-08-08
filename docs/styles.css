@@ -141,6 +141,11 @@ h2 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: clamp(40px
 .sentence-path b { width: 100%; margin-top: 22px; font: 700 clamp(38px, 5vw, 63px) "Songti SC", serif; letter-spacing: -.07em; }
 .feature-private { background: var(--celadon); }
 .local-seal { position: absolute; right: 28px; bottom: 22px; color: #2d8269; font: 800 43px/.75 "SF Mono", Menlo, monospace; letter-spacing: -.1em; transform: rotate(-7deg); opacity: .22; }
+.feature-system { grid-column: 1 / -1; min-height: 250px; padding-right: min(44%, 500px); background: linear-gradient(120deg, rgba(255,255,255,.9), var(--blue-pale)); }
+.system-route { position: absolute; right: 34px; bottom: 50%; display: flex; align-items: center; gap: 10px; transform: translateY(50%); font: 650 12px "SF Mono", Menlo, monospace; }
+.system-route span, .system-route b { padding: 12px 14px; border: 1px solid #aebce2; border-radius: 10px; background: rgba(255,255,255,.78); }
+.system-route b { color: white; border-color: var(--blue); background: var(--blue); }
+.system-route i { width: 24px; height: 1px; background: #8fa1cf; }
 
 .dictionary { display: grid; grid-template-columns: 1.05fr .95fr; gap: 90px; align-items: center; border-block: 1px solid var(--line); }
 .dictionary-copy > p:last-child { max-width: 620px; margin-top: 25px; color: var(--muted); line-height: 1.85; }
@@ -179,6 +184,9 @@ footer > a:last-child { color: white; text-align: right; font-size: 13px; }
   .section-shell { padding-block: 88px; }
   .feature-grid, .dictionary, .install-steps { grid-template-columns: 1fr; }
   .feature-sentence { grid-row: auto; min-height: 540px; }
+  .feature-system { grid-column: auto; min-height: 360px; padding-right: 34px; }
+  .system-route { right: 34px; bottom: 34px; left: 34px; justify-content: center; transform: none; }
+  .system-route i { width: 12px; }
   .dictionary { gap: 28px; }
   .source-cloud { padding: 20px 0; justify-content: flex-start; }
   .install-note { align-items: stretch; flex-direction: column; }

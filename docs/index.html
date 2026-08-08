@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="MyIME 是一款完全离线、支持智能整句与本地自学习的 macOS 简体中文输入法。">
+  <meta name="description" content="MyIME 1.0.2 是一款完全离线、支持智能整句、本地自学习与系统级输入连接的 macOS 简体中文输入法。">
   <meta name="theme-color" content="#f5f8ff">
   <title>MyIME — 越用越懂你的 macOS 中文输入法</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='17' fill='%231748e8'/%3E%3Ctext x='13' y='44' fill='white' font-size='38' font-family='monospace' font-weight='700'%3EM%3C/text%3E%3C/svg%3E">
@@ -20,17 +20,17 @@
       <a href="#features">特点</a>
       <a href="#install">安装</a>
       <a href="https://github.com/bennix/MyIME">GitHub</a>
-      <a class="nav-download" href="https://github.com/bennix/MyIME/releases/latest">下载</a>
+      <a class="nav-download" href="https://github.com/bennix/MyIME/releases/download/v1.0.2/MyIME-1.0.2.dmg">下载 1.0.2</a>
     </nav>
   </header>
 
   <main id="top">
     <section class="hero" aria-labelledby="hero-title">
-      <p class="eyebrow">macOS · 简体中文 · 完全离线</p>
+      <p class="eyebrow">MyIME 1.0.2 · macOS · 简体中文 · 完全离线</p>
       <h1 id="hero-title">拼音不停顿，<br><em>句子自然出现。</em></h1>
-      <p class="hero-copy">MyIME 把整句预测、丰富词库和本地自学习装进一款轻巧的输入法。你的文字留在电脑里，你的习惯也只属于你。</p>
+      <p class="hero-copy">MyIME 把整句预测、51 万条本地候选数据和自学习装进一款系统级输入法。你的文字留在电脑里，你的习惯也只属于你。</p>
       <div class="hero-actions">
-        <a class="button primary" href="https://github.com/bennix/MyIME/releases/latest">下载 MyIME 1.0</a>
+        <a class="button primary" href="https://github.com/bennix/MyIME/releases/download/v1.0.2/MyIME-1.0.2.dmg">下载 MyIME 1.0.2</a>
         <a class="button secondary" href="#demo">先试试候选</a>
       </div>
 
@@ -53,7 +53,7 @@
     </section>
 
     <section class="proof-strip" aria-label="核心能力">
-      <p><strong>18,397,885</strong><span>个语料字段参与语言模型训练</span></p>
+      <p><strong>515,577</strong><span>条本地候选数据</span></p>
       <p><strong>321,452</strong><span>条紧凑三元语言统计</span></p>
       <p><strong>0</strong><span>输入内容上传云端</span></p>
     </section>
@@ -89,6 +89,12 @@
           <p>候选、词频、短句组合都在本机完成。无需账号，也没有云端输入记录。</p>
           <div class="local-seal" aria-hidden="true">OFF<br>LINE</div>
         </article>
+        <article class="feature feature-system">
+          <span class="feature-tag">系统</span>
+          <h3>按 macOS 输入法方式运行</h3>
+          <p>采用鼠须管成熟的 IMK 生命周期思路：服务提前建立、更新时刷新注册、切换后清理残留候选。名称、词库和学习引擎仍然都是 MyIME。</p>
+          <div class="system-route" aria-hidden="true"><span>应用</span><i></i><b>MyIME</b><i></i><span>本地词库</span></div>
+        </article>
       </div>
     </section>
 
@@ -96,7 +102,7 @@
       <div class="dictionary-copy">
         <p class="eyebrow">词库不是一份名单，而是表达的底色</p>
         <h2 id="dict-title">从日常用语到专业词汇，都在本地。</h2>
-        <p>基础词库结合 Rime-Ice、THUOCL、中文维基，以及新闻、百科问答、社区问答和翻译语料派生的紧凑语言模型。原始语料不会随应用分发。</p>
+        <p>基础词库结合 Rime-Ice、THUOCL、中文维基，以及新闻、百科问答、社区问答和翻译语料派生的紧凑语言模型。默认输出简体；可选繁体只转换显示和上屏，仍共享同一套 MyIME 词库与学习记录。</p>
       </div>
       <ul class="source-cloud" aria-label="词库来源">
         <li>Rime-Ice</li><li>THUOCL</li><li>中文维基</li><li>新闻语料</li><li>百科问答</li><li>社区问答</li><li>中英翻译</li>
@@ -114,8 +120,8 @@
         <li><span>切换</span><p>在菜单栏输入法列表中选择 MyIME。</p></li>
       </ol>
       <div class="install-note">
-        <p>适用于 macOS 26.5 或更高版本。当前版本尚未完成 Apple 公证；如果首次打开被阻止，请按住 Control 点击应用并选择“打开”。</p>
-        <a class="button primary" href="https://github.com/bennix/MyIME/releases/latest">获取安装镜像</a>
+        <p><strong>版本 1.0.2 · 构建 52</strong><br>适用于 macOS 26.5 或更高版本。当前版本尚未完成 Apple 公证；如果首次打开被阻止，请按住 Control 点击应用并选择“打开”。</p>
+        <a class="button primary" href="https://github.com/bennix/MyIME/releases/download/v1.0.2/MyIME-1.0.2.dmg">获取 1.0.2 安装镜像</a>
       </div>
     </section>
   </main>
