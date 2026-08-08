@@ -140,6 +140,14 @@ h2 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: clamp(40px
 .brief-points strong { display: block; margin: 1px 0 8px; font-family: "Songti SC", "STSong", serif; font-size: 25px; }
 .brief-points p { max-width: 590px; margin: 0; color: var(--muted); line-height: 1.75; }
 .brief-closing { grid-column: 1 / -1; margin: 8px 0 0; padding-top: 25px; border-top: 1px solid var(--ink); color: var(--ink); font-family: "Songti SC", "STSong", serif; font-size: clamp(25px, 3vw, 38px); letter-spacing: -.035em; }
+.real-demo { padding-top: 0; }
+.real-demo-heading { display: flex; align-items: end; justify-content: space-between; gap: 40px; margin-bottom: 44px; }
+.real-demo-heading h2 { max-width: 710px; text-align: right; }
+.real-demo-frame { position: relative; overflow: hidden; margin: 0; padding: 15px; border: 1px solid var(--line); border-radius: 24px; background: rgba(255,255,255,.8); box-shadow: var(--shadow); }
+.real-demo-frame a { display: block; cursor: zoom-in; }
+.real-demo-frame img { display: block; width: 100%; height: auto; border-radius: 13px; background: #f7f7f7; }
+.real-demo-frame figcaption { position: absolute; right: 27px; bottom: 26px; padding: 8px 11px; border: 1px solid rgba(217,224,241,.9); border-radius: 99px; color: #46506a; background: rgba(255,255,255,.88); box-shadow: 0 5px 16px rgba(36,63,125,.12); backdrop-filter: blur(12px); font-size: 11px; }
+.real-demo-frame figcaption span { margin-right: 6px; color: #ff4b4b; }
 .feature-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 16px; margin-top: 54px; }
 .feature { position: relative; min-height: 310px; overflow: hidden; padding: 34px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.72); }
 .feature-sentence { grid-row: span 2; min-height: 636px; background: var(--blue); color: white; }
@@ -205,6 +213,11 @@ footer > a:last-child { color: white; text-align: right; font-size: 13px; }
   .brief-points li > span { width: 38px; height: 38px; font-size: 18px; }
   .brief-points strong { font-size: 22px; }
   .brief-closing { grid-column: auto; margin-top: 0; }
+  .real-demo-heading { display: block; margin-bottom: 28px; }
+  .real-demo-heading h2 { margin-top: 14px; text-align: left; }
+  .real-demo-frame { padding: 7px; border-radius: 16px; }
+  .real-demo-frame img { border-radius: 10px; }
+  .real-demo-frame figcaption { right: 13px; bottom: 13px; padding: 6px 8px; }
   .feature-grid, .dictionary, .install-steps { grid-template-columns: 1fr; }
   .feature-sentence { grid-row: auto; min-height: 540px; }
   .feature-system { grid-column: auto; min-height: 360px; padding-right: 34px; }
