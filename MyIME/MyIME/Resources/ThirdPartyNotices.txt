@@ -1,0 +1,45 @@
+MyIME Offline Dictionary Notices
+
+The bundled offline dictionary is adapted from CC-CEDICT, published by MDBG, and from frequency
+data distributed with jieba.
+
+CC-CEDICT is licensed under Creative Commons Attribution-ShareAlike 4.0 International:
+https://creativecommons.org/licenses/by-sa/4.0/
+Source and attribution: https://www.mdbg.net/chinese/dictionary?page=cc-cedict
+Referenced upstream work: CEDICT, Copyright 1997–1998 Paul Andrew Denisowski.
+Changes made by MyIME: simplified forms were selected, tone numbers were removed, frequency data
+was combined, and the result was compiled into SQLite. The adapted dictionary data is distributed
+under CC BY-SA 4.0.
+
+jieba is Copyright (c) 2013 Sun Junyi and distributed under the MIT License:
+https://github.com/fxsjy/jieba
+
+Selected dictionary data from Rime Ice by iDvel and contributors is included from revision
+569ff3bc65dd4aec0a26b33c49c8bbdfa8b5fd57 and adapted to MyIME's SQLite format. It is distributed
+under GNU GPL version 3. Source: https://github.com/iDvel/rime-ice
+A copy of the license is included as GPL-3.0.txt.
+
+Additional derived terms are included from:
+- fcitx5-pinyin-zhwiki revision cb1073ce2042ab431c872da7699d62ed8b857cff
+  (Unlicense; generated source terms subject to Wikimedia terms)
+- Jinghang Dictionary revision 4ee6f087f33ef5e6cede360277930e296881f11e
+  (this is a modified/derived data set, not an official upstream release)
+- renfei/dict revision f85efb9ffc788c7d79112448aed11b2225b3e0ac (MIT)
+- THUOCL by THUNLP revision a30ce79d895d01ab5132a5c74c29703ff7efb4cc (MIT)
+
+Candidate sentence ranking uses a compact trigram frequency model derived from the NLP Chinese
+Corpus project by Bright Xu / brightmart, revision 5dc872154777d24c897f957f1ec848fc7fd59aa9:
+https://github.com/brightmart/nlp_chinese_corpus
+https://doi.org/10.5281/zenodo.3402023
+Training sources: wiki2019zh, news2016zh, baike2018qa, webtext2019zh, and the Chinese side of
+translation2019zh. MyIME does not bundle the original corpus text. Original content retains the
+rights and source terms of its Wikipedia, news, community, encyclopedia, and translation providers.
+
+THUOCL Copyright (c) 2018 THUNLP. Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation files, to deal in the Software
+without restriction, including the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies, subject to inclusion of the copyright and permission notice.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+Exact source links, checksums, licenses, and transformation details are recorded in the MyIME
+source distribution under tools/SOURCES.lock and tools/LICENSES.md.

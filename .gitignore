@@ -1,0 +1,9 @@
+build/
+MyIME/IMEKit/.build/
+*.xcresult
+.DS_Store
+.serena/
+*.profraw
+xcuserdata/
+*.xcuserstate
+dist/

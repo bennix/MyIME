@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="MyIME 是一款完全离线、支持智能整句与本地自学习的 macOS 简体中文输入法。">
+  <meta name="theme-color" content="#f5f8ff">
+  <title>MyIME — 越用越懂你的 macOS 中文输入法</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='17' fill='%231748e8'/%3E%3Ctext x='13' y='44' fill='white' font-size='38' font-family='monospace' font-weight='700'%3EM%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="MyIME 首页">
+      <span class="brand-mark" aria-hidden="true">M<span></span></span>
+      <span>MyIME</span>
+    </a>
+    <nav aria-label="主导航">
+      <a href="#features">特点</a>
+      <a href="#install">安装</a>
+      <a href="https://github.com/bennix/MyIME">GitHub</a>
+      <a class="nav-download" href="https://github.com/bennix/MyIME/releases/latest">下载</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <p class="eyebrow">macOS · 简体中文 · 完全离线</p>
+      <h1 id="hero-title">拼音不停顿，<br><em>句子自然出现。</em></h1>
+      <p class="hero-copy">MyIME 把整句预测、丰富词库和本地自学习装进一款轻巧的输入法。你的文字留在电脑里，你的习惯也只属于你。</p>
+      <div class="hero-actions">
+        <a class="button primary" href="https://github.com/bennix/MyIME/releases/latest">下载 MyIME 1.0</a>
+        <a class="button secondary" href="#demo">先试试候选</a>
+      </div>
+
+      <div class="composition-stage" id="demo">
+        <div class="stage-heading">
+          <span>现场候选</span>
+          <span class="stage-hint">输入拼音，看看它怎么想</span>
+        </div>
+        <label class="pinyin-input-wrap">
+          <span class="sr-only">输入拼音</span>
+          <input id="pinyin-demo" type="text" value="xiaozhuzaishuiliyouyong" autocomplete="off" spellcheck="false" aria-describedby="demo-help">
+          <span class="input-caret" aria-hidden="true"></span>
+        </label>
+        <p id="demo-help" class="demo-help">也可以试试：<button data-demo="shuru">shuru</button>、<button data-demo="aisinile">aisinile</button>、<button data-demo="jinwanchigefan">jinwanchigefan</button></p>
+        <div class="candidate-bar" aria-live="polite">
+          <ol id="candidate-list"></ol>
+          <span class="expand-glyph" aria-hidden="true">⌄</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="proof-strip" aria-label="核心能力">
+      <p><strong>18,397,885</strong><span>个语料字段参与语言模型训练</span></p>
+      <p><strong>321,452</strong><span>条紧凑三元语言统计</span></p>
+      <p><strong>0</strong><span>输入内容上传云端</span></p>
+    </section>
+
+    <section class="features section-shell" id="features" aria-labelledby="features-title">
+      <div class="section-intro">
+        <p class="eyebrow">不是把字打出来就够了</p>
+        <h2 id="features-title">它记住的是你的表达方式。</h2>
+      </div>
+      <div class="feature-grid">
+        <article class="feature feature-sentence">
+          <span class="feature-tag">整句</span>
+          <h3>长拼音，也能一次想完整</h3>
+          <p>从“小狗追蝴蝶”到“今晚吃个饭”，完整覆盖全部拼音的自然短句会优先出现。</p>
+          <div class="sentence-path" aria-hidden="true">
+            <span>xiao</span><i></i><span>gou</span><i></i><span>zhui</span><i></i><span>hu</span><i></i><span>die</span>
+            <b>小狗追蝴蝶</b>
+          </div>
+        </article>
+        <article class="feature">
+          <span class="feature-tag">学习</span>
+          <h3>分开选择，也会自动成词</h3>
+          <p>先选“输”，3 秒内再选“入”，下次输入 <code>shuru</code>，“输入”就会成为优先候选。</p>
+        </article>
+        <article class="feature">
+          <span class="feature-tag">词频</span>
+          <h3>刚用过的，更靠前</h3>
+          <p>重复选择持续提升权重；临近使用获得时效加权，常用词不必每次重新寻找。</p>
+        </article>
+        <article class="feature feature-private">
+          <span class="feature-tag">本地</span>
+          <h3>懂你，但不认识你</h3>
+          <p>候选、词频、短句组合都在本机完成。无需账号，也没有云端输入记录。</p>
+          <div class="local-seal" aria-hidden="true">OFF<br>LINE</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="dictionary section-shell" aria-labelledby="dict-title">
+      <div class="dictionary-copy">
+        <p class="eyebrow">词库不是一份名单，而是表达的底色</p>
+        <h2 id="dict-title">从日常用语到专业词汇，都在本地。</h2>
+        <p>基础词库结合 Rime-Ice、THUOCL、中文维基，以及新闻、百科问答、社区问答和翻译语料派生的紧凑语言模型。原始语料不会随应用分发。</p>
+      </div>
+      <ul class="source-cloud" aria-label="词库来源">
+        <li>Rime-Ice</li><li>THUOCL</li><li>中文维基</li><li>新闻语料</li><li>百科问答</li><li>社区问答</li><li>中英翻译</li>
+      </ul>
+    </section>
+
+    <section class="install section-shell" id="install" aria-labelledby="install-title">
+      <div class="section-intro">
+        <p class="eyebrow">安装只做一次</p>
+        <h2 id="install-title">打开应用，剩下的交给 MyIME。</h2>
+      </div>
+      <ol class="install-steps">
+        <li><span>下载</span><p>从 GitHub Release 获取最新 DMG。</p></li>
+        <li><span>打开</span><p>双击 MyIME，按提示授权自动安装。</p></li>
+        <li><span>切换</span><p>在菜单栏输入法列表中选择 MyIME。</p></li>
+      </ol>
+      <div class="install-note">
+        <p>适用于 macOS 26.5 或更高版本。当前版本尚未完成 Apple 公证；如果首次打开被阻止，请按住 Control 点击应用并选择“打开”。</p>
+        <a class="button primary" href="https://github.com/bennix/MyIME/releases/latest">获取安装镜像</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">M<span></span></span><span>MyIME</span></a>
+    <p>为自然的中文输入而做。源代码与第三方许可信息公开在 GitHub。</p>
+    <a href="https://github.com/bennix/MyIME">查看源代码 ↗</a>
+  </footer>
+</body>
+</html>
