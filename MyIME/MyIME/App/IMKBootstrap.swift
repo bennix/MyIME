@@ -85,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         _ = IMEEnvironment.shared
         _ = SelfInstaller.ensureRegistered(logger: logger)
+        SelfInstaller.ensureLoginRegistration(logger: logger)
         installStatusMenu()
         DistributedNotificationCenter.default().addObserver(
             self,

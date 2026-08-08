@@ -34,6 +34,9 @@ enum SelfInstaller {
         default:
             return false
         }
+        // 命令模式是短命进程：TIS 的注册/启用变更经 XPC 异步提交，
+        // 立即退出会导致变更丢失，退出前稍作等待确保提交完成。
+        Thread.sleep(forTimeInterval: 1)
         return true
     }
 
@@ -68,32 +71,79 @@ enum SelfInstaller {
         register(installedURL, logger: logger)
     }
 
+    /// 安装登录时自动运行 `--register-input-source` 的 LaunchAgent，
+    /// 保证重启后输入源的注册与启用不依赖系统缓存状态。
+    static func ensureLoginRegistration(logger: Logger) {
+        let agentDirectory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        let agentURL = agentDirectory.appendingPathComponent("fudan.miniS.inputmethod.MyIME.register.plist")
+        let plist: [String: Any] = [
+            "Label": "fudan.miniS.inputmethod.MyIME.register",
+            "ProgramArguments": [
+                installedURL.appendingPathComponent("Contents/MacOS/MyIME").path,
+                "--register-input-source",
+            ],
+            "RunAtLoad": true,
+        ]
+        do {
+            let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            if (try? Data(contentsOf: agentURL)) == data { return }
+            try FileManager.default.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+            try data.write(to: agentURL)
+            logger.notice("已安装登录自动注册 LaunchAgent")
+        } catch {
+            logger.error("安装 LaunchAgent 失败：\(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     @discardableResult
     private static func register(_ appURL: URL, logger: Logger) -> Bool {
         guard let modes = Bundle(url: appURL)?.object(forInfoDictionaryKey: "ComponentInputModeDict") as? [String: Any],
               let modeList = modes["tsInputModeListKey"] as? [String: Any] else { return false }
 
-        let status = TISRegisterInputSource(appURL as CFURL)
-        if status != noErr {
-            logger.error("输入法注册失败，状态码：\(status)")
-            return false
+        // 仅在系统尚未发现任一输入模式、或包版本变化（Info.plist 元数据需刷新）时才注册：
+        // 对已注册的输入源重复调用 TISRegisterInputSource 会清空其启用状态。
+        let versionKey = "LastRegisteredBundleVersion"
+        let bundleVersion = Bundle(url: appURL)?.infoDictionary?["CFBundleVersion"] as? String
+        let needsRegistration = modeList.keys.contains(where: { inputSource(withID: $0) == nil })
+            || UserDefaults.standard.string(forKey: versionKey) != bundleVersion
+        if needsRegistration {
+            let status = TISRegisterInputSource(appURL as CFURL)
+            if status != noErr {
+                logger.error("输入法注册失败，状态码：\(status)")
+                return false
+            }
+            UserDefaults.standard.set(bundleVersion, forKey: versionKey)
+        }
+        // 必须先启用父输入法：重启后系统启用列表可能被清空，
+        // 而子模式只有在父源已启用时才能真正被启用（否则静默失败）。
+        if let bundleID = Bundle(url: appURL)?.bundleIdentifier {
+            let parentFilter = [kTISPropertyInputSourceID as String: bundleID] as CFDictionary
+            if let parents = TISCreateInputSourceList(parentFilter, true) {
+                for case let source as TISInputSource in parents.takeRetainedValue() as NSArray {
+                    let parentStatus = TISEnableInputSource(source)
+                    if parentStatus != noErr {
+                        logger.error("父输入法启用失败，状态码：\(parentStatus)")
+                    }
+                }
+            }
         }
         var enabledModeCount = 0
         for identifier in modeList.keys {
-            if isEnabledInputSource(identifier) {
-                enabledModeCount += 1
-                continue
-            }
+            // 不依赖 kTISPropertyInputSourceIsEnabled：重启后该标记可能残留为
+            // “已启用”，而实际启用列表已丢失。重复启用已启用的源是无害的。
             let filter = [kTISPropertyInputSourceID as String: identifier] as CFDictionary
             guard let result = TISCreateInputSourceList(filter, true) else { continue }
+            var enabled = false
             for case let source as TISInputSource in result.takeRetainedValue() as NSArray {
                 let enableStatus = TISEnableInputSource(source)
                 if enableStatus != noErr {
                     logger.error("输入模式启用失败，状态码：\(enableStatus)")
                 } else {
-                    enabledModeCount += 1
+                    enabled = true
                 }
             }
+            if enabled { enabledModeCount += 1 }
         }
         guard enabledModeCount == modeList.count else { return false }
         logger.notice("MyIME 输入源已经注册并启用")
@@ -114,16 +164,17 @@ enum SelfInstaller {
 
     @discardableResult
     private static func setInputSourceEnabled(_ enabled: Bool, logger: Logger) -> Bool {
+        if enabled {
+            // 走完整注册路径：父输入法未启用时单独启用子模式会静默失败。
+            return register(installedURL, logger: logger)
+        }
         guard let source = inputSource(withID: inputModeID) else {
-            if enabled {
-                return register(installedURL, logger: logger)
-            }
             logger.error("找不到 MyIME 输入模式")
             return false
         }
-        let status = enabled ? TISEnableInputSource(source) : TISDisableInputSource(source)
+        let status = TISDisableInputSource(source)
         if status != noErr {
-            logger.error("输入模式\(enabled ? "启用" : "停用")失败，状态码：\(status)")
+            logger.error("输入模式停用失败，状态码：\(status)")
             return false
         }
         return true
