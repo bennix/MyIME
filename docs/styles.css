@@ -126,6 +126,20 @@ h1 em { color: var(--blue); font-style: normal; }
 .section-shell { width: min(1120px, calc(100% - 40px)); margin-inline: auto; padding-block: 128px; }
 .section-intro { max-width: 730px; }
 h2 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: clamp(40px, 5.3vw, 68px); line-height: 1.08; letter-spacing: -.055em; }
+.product-brief { display: grid; grid-template-columns: .86fr 1.14fr; gap: 90px; align-items: start; }
+.brief-intro { position: sticky; top: 112px; }
+.brief-intro > p:last-child { max-width: 420px; margin: 25px 0 0; color: var(--muted); font-size: 18px; line-height: 1.75; }
+.brief-points { position: relative; display: grid; gap: 0; margin: 0; padding: 0 0 0 34px; list-style: none; }
+.brief-points::before { content: ""; position: absolute; top: 20px; bottom: 20px; left: 8px; width: 3px; border-radius: 99px; background: var(--blue); box-shadow: 0 0 24px rgba(23,72,232,.35); }
+.brief-points li { position: relative; display: grid; grid-template-columns: 42px 1fr; gap: 17px; padding: 27px 0; border-bottom: 1px solid var(--line); }
+.brief-points li:first-child { padding-top: 0; }
+.brief-points li:last-child { padding-bottom: 0; border-bottom: 0; }
+.brief-points li::before { content: ""; position: absolute; top: 36px; left: -31px; width: 13px; height: 13px; border: 3px solid var(--paper); border-radius: 50%; background: var(--blue); }
+.brief-points li:first-child::before { top: 9px; }
+.brief-points li > span { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.8); font-size: 20px; }
+.brief-points strong { display: block; margin: 1px 0 8px; font-family: "Songti SC", "STSong", serif; font-size: 25px; }
+.brief-points p { max-width: 590px; margin: 0; color: var(--muted); line-height: 1.75; }
+.brief-closing { grid-column: 1 / -1; margin: 8px 0 0; padding-top: 25px; border-top: 1px solid var(--ink); color: var(--ink); font-family: "Songti SC", "STSong", serif; font-size: clamp(25px, 3vw, 38px); letter-spacing: -.035em; }
 .feature-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 16px; margin-top: 54px; }
 .feature { position: relative; min-height: 310px; overflow: hidden; padding: 34px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.72); }
 .feature-sentence { grid-row: span 2; min-height: 636px; background: var(--blue); color: white; }
@@ -182,6 +196,15 @@ footer > a:last-child { color: white; text-align: right; font-size: 13px; }
   .proof-strip { grid-template-columns: 1fr; }
   .proof-strip p { border-right: 0; border-bottom: 1px solid var(--line); }
   .section-shell { padding-block: 88px; }
+  .product-brief { grid-template-columns: 1fr; gap: 48px; }
+  .brief-intro { position: static; }
+  .brief-points { padding-left: 26px; }
+  .brief-points::before { left: 5px; }
+  .brief-points li { grid-template-columns: 38px 1fr; gap: 13px; }
+  .brief-points li::before { left: -26px; }
+  .brief-points li > span { width: 38px; height: 38px; font-size: 18px; }
+  .brief-points strong { font-size: 22px; }
+  .brief-closing { grid-column: auto; margin-top: 0; }
   .feature-grid, .dictionary, .install-steps { grid-template-columns: 1fr; }
   .feature-sentence { grid-row: auto; min-height: 540px; }
   .feature-system { grid-column: auto; min-height: 360px; padding-right: 34px; }
