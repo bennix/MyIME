@@ -67,9 +67,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard shouldStartServer else { return }
         _ = IMEEnvironment.shared
         server = IMKServer(name: "MyIME_1_Connection", bundleIdentifier: Bundle.main.bundleIdentifier)
-        if !SelfInstaller.ensureRegistered(logger: logger) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [logger] in
+        _ = SelfInstaller.ensureRegistered(logger: logger)
+        SelfInstaller.restoreSelectionIfRequested(logger: logger)
+        for delay in [1.0, 4.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [logger] in
                 _ = SelfInstaller.ensureRegistered(logger: logger)
+                SelfInstaller.restoreSelectionIfRequested(logger: logger)
             }
         }
         NSApp.setActivationPolicy(.accessory)

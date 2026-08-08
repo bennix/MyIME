@@ -4,6 +4,8 @@ import os
 
 enum SelfInstaller {
     private static let installedURL = URL(fileURLWithPath: "/Library/Input Methods/MyIME.app", isDirectory: true)
+    private static let inputModeID = "fudan.miniS.inputmethod.MyIME.Chinese"
+    private static let restoreSelectionArgument = "--restore-myime-selection"
 
     static func prepareInstalledCopy(logger: Logger) -> Bool {
         let current = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
@@ -14,12 +16,15 @@ enum SelfInstaller {
         }
 
         do {
+            let shouldRestoreSelection = currentInputSourceID() == inputModeID
             try installWithAdministratorPrivileges(from: current, to: installed)
             _ = register(installed, logger: logger)
 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", "sleep 1; /usr/bin/killall MyIME 2>/dev/null; sleep 1; /usr/bin/open \(shellQuote(installed.path))"]
+            let executable = installed.appendingPathComponent("Contents/MacOS/MyIME").path
+            let restoreArgument = shouldRestoreSelection ? " \(restoreSelectionArgument)" : ""
+            process.arguments = ["-c", "sleep 1; /usr/bin/killall MyIME 2>/dev/null; sleep 3; /usr/bin/nohup \(shellQuote(executable))\(restoreArgument) >/dev/null 2>&1 &"]
             try process.run()
             DispatchQueue.main.async { NSApp.terminate(nil) }
             return false
@@ -31,6 +36,24 @@ enum SelfInstaller {
 
     static func ensureRegistered(logger: Logger) -> Bool {
         register(installedURL, logger: logger)
+    }
+
+    static func restoreSelectionIfRequested(logger: Logger) {
+        guard ProcessInfo.processInfo.arguments.contains(restoreSelectionArgument) else { return }
+        if currentInputSourceID() == inputModeID {
+            logger.notice("MyIME 输入源已保持选中")
+            return
+        }
+        let filter = [kTISPropertyInputSourceID as String: inputModeID] as CFDictionary
+        guard let result = TISCreateInputSourceList(filter, true) else { return }
+        for case let source as TISInputSource in result.takeRetainedValue() as NSArray {
+            let status = TISSelectInputSource(source)
+            if status == noErr {
+                logger.notice("已恢复更新前选择的 MyIME 输入源")
+                return
+            }
+            logger.error("恢复 MyIME 输入源失败，状态码：\(status)")
+        }
     }
 
     @discardableResult
@@ -60,12 +83,17 @@ enum SelfInstaller {
         return true
     }
 
+    private static func currentInputSourceID() -> String? {
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return nil }
+        return Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue() as? String
+    }
+
     private static func installWithAdministratorPrivileges(from source: URL, to destination: URL) throws {
         let userCopy = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Input Methods/MyIME.app", isDirectory: true)
         let command = [
             "/bin/mkdir -p \(shellQuote(destination.deletingLastPathComponent().path))",
-            "/bin/rm -rf \(shellQuote(destination.path))",
             "/usr/bin/ditto \(shellQuote(source.path)) \(shellQuote(destination.path))",
             "/usr/sbin/chown -R root:wheel \(shellQuote(destination.path))",
             "/bin/rm -rf \(shellQuote(userCopy.path))"
