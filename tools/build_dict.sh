@@ -14,6 +14,9 @@ JIEBA="$BUILD_DIR/jieba-dict.txt"
 RIME_COMMIT=569ff3bc65dd4aec0a26b33c49c8bbdfa8b5fd57
 THUOCL_COMMIT=a30ce79d895d01ab5132a5c74c29703ff7efb4cc
 ZHWIKI="$BUILD_DIR/zhwiki-20260416.dict.yaml"
+OPENCC_COMMIT=81223ed87ae53283ef518e2deac34b7971f8a39e
+OPENCC_PHRASES="$BUILD_DIR/opencc-STPhrases.txt"
+OPENCC_CHARACTERS="$BUILD_DIR/opencc-STCharacters.txt"
 if [ ! -f "$CEDICT" ]; then
   curl -L --fail --silent --show-error \
     https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz \
@@ -37,6 +40,16 @@ if [ ! -f "$ZHWIKI" ]; then
     https://github.com/felixonmars/fcitx5-pinyin-zhwiki/releases/download/0.3.0/zhwiki-20260416.dict.yaml \
     -o "$ZHWIKI"
 fi
+if [ ! -f "$OPENCC_PHRASES" ]; then
+  curl -L --fail --silent --show-error \
+    "https://raw.githubusercontent.com/BYVoid/OpenCC/$OPENCC_COMMIT/data/dictionary/STPhrases.txt" \
+    -o "$OPENCC_PHRASES"
+fi
+if [ ! -f "$OPENCC_CHARACTERS" ]; then
+  curl -L --fail --silent --show-error \
+    "https://raw.githubusercontent.com/BYVoid/OpenCC/$OPENCC_COMMIT/data/dictionary/STCharacters.txt" \
+    -o "$OPENCC_CHARACTERS"
+fi
 if [ ! -d "$BUILD_DIR/Jinghang-Dictionary/.git" ]; then
   git clone --quiet https://github.com/kkhkl/Jinghang-Dictionary.git "$BUILD_DIR/Jinghang-Dictionary"
 fi
@@ -56,6 +69,8 @@ echo "c800e7a52d60050ebdfcad7f309fc3c941a1e6f721e36e3c797bec6316e886c1  $BUILD_D
 echo "6a6b1a77d94c7cdf9203cf426e67f350215d2d73259fe3769c97d2a18f521c28  $BUILD_DIR/rime-ice-others.dict.yaml" | shasum -a 256 -c
 echo "ea30c3a7e37fd516fa0f894b33bfd7b8e855f14ae263ba84db763fed633c2d32  $BUILD_DIR/rime-ice-8105.dict.yaml" | shasum -a 256 -c
 echo "5c140e462f9c00a119500b7fec0d3b927f0f83920001a7ea408e26748d09ea07  $ZHWIKI" | shasum -a 256 -c
+echo "7f121e46abc71c1055ebee0445be4a98290023124657b24557f1a36bd2dc144d  $OPENCC_PHRASES" | shasum -a 256 -c
+echo "81c27e6364fd164181276197b9215cf95f7f12a050aa207375248a5badf8d6fc  $OPENCC_CHARACTERS" | shasum -a 256 -c
 
 MERGED="$BUILD_DIR/merged.tsv"
 "$PYTHON_BIN" "$SCRIPT_DIR/build_full_dict.py" \
@@ -76,5 +91,6 @@ CORPUS_DIR="$ROOT_DIR/build/sources/brightmart"
 "$PYTHON_BIN" "$SCRIPT_DIR/compile.py" \
   "$MERGED" \
   "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite" \
-  --language-model "$BUILD_DIR/language_model.tsv"
+  --language-model "$BUILD_DIR/language_model.tsv" \
+  --opencc "$OPENCC_PHRASES" "$OPENCC_CHARACTERS"
 "$PYTHON_BIN" "$SCRIPT_DIR/verify.py" "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite"

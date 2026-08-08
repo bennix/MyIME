@@ -8,8 +8,9 @@ manifest = json.loads(database.execute("SELECT value FROM meta WHERE key='source
 manifest_sources = {source["id"] for source in manifest["sources"] if source["kept"] > 0}
 checks = {
     "integrity": database.execute("PRAGMA integrity_check").fetchone()[0] == "ok",
-    "schema": {"meta", "entries", "language_ngram"}.issubset({row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}),
+    "schema": {"meta", "entries", "language_ngram", "traditional_map"}.issubset({row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}),
     "language_model": database.execute("SELECT count(*) FROM language_ngram").fetchone()[0] >= 200_000,
+    "traditional_conversion": database.execute("SELECT count(*) FROM traditional_map").fetchone()[0] >= 50_000,
     "dedup": database.execute("SELECT count(*) FROM entries").fetchone()[0] == database.execute("SELECT count(*) FROM (SELECT DISTINCT word,py_key FROM entries)").fetchone()[0],
     "golden": all(database.execute("SELECT 1 FROM entries WHERE word=? AND py_key=?", item).fetchone() for item in [
         ("你好", "nihao"), ("世界", "shijie"), ("北京", "beijing"), ("中国", "zhongguo"), ("我爱你", "woaini")

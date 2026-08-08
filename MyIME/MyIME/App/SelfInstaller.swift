@@ -5,26 +5,56 @@ import os
 enum SelfInstaller {
     private static let installedURL = URL(fileURLWithPath: "/Library/Input Methods/MyIME.app", isDirectory: true)
     private static let inputModeID = "fudan.miniS.inputmethod.MyIME.Chinese"
-    private static let restoreSelectionArgument = "--restore-myime-selection"
+
+    static var isRunningInstalledCopy: Bool {
+        Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+            == installedURL.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    static var isCurrentInputSource: Bool {
+        currentInputSourceID() == inputModeID
+    }
+
+    static func performCommandIfRequested(logger: Logger) -> Bool {
+        guard let command = ProcessInfo.processInfo.arguments.dropFirst().first else { return false }
+        switch command {
+        case "--register-input-source", "--install":
+            _ = ensureRegistered(logger: logger)
+        case "--enable-input-source":
+            _ = setInputSourceEnabled(true, logger: logger)
+        case "--disable-input-source":
+            _ = setInputSourceEnabled(false, logger: logger)
+        case "--select-input-source":
+            _ = selectInputSource(logger: logger)
+        case "--quit":
+            let bundleID = Bundle.main.bundleIdentifier ?? "fudan.miniS.inputmethod.MyIME"
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+                .forEach { $0.terminate() }
+        default:
+            return false
+        }
+        return true
+    }
 
     static func prepareInstalledCopy(logger: Logger) -> Bool {
         let current = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
         let installed = installedURL.resolvingSymlinksInPath().standardizedFileURL
 
-        if current == installed {
+        if isRunningInstalledCopy {
             return true
         }
 
         do {
-            let shouldRestoreSelection = currentInputSourceID() == inputModeID
             try installWithAdministratorPrivileges(from: current, to: installed)
-            _ = register(installed, logger: logger)
 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
             let executable = installed.appendingPathComponent("Contents/MacOS/MyIME").path
-            let restoreArgument = shouldRestoreSelection ? " \(restoreSelectionArgument)" : ""
-            process.arguments = ["-c", "sleep 1; /usr/bin/killall MyIME 2>/dev/null; sleep 3; /usr/bin/nohup \(shellQuote(executable))\(restoreArgument) >/dev/null 2>&1 &"]
+            process.arguments = [
+                "-c",
+                "sleep 1; /usr/bin/killall MyIME 2>/dev/null; sleep 1; \(shellQuote(executable)) --register-input-source"
+            ]
             try process.run()
             DispatchQueue.main.async { NSApp.terminate(nil) }
             return false
@@ -38,35 +68,22 @@ enum SelfInstaller {
         register(installedURL, logger: logger)
     }
 
-    static func restoreSelectionIfRequested(logger: Logger) {
-        guard ProcessInfo.processInfo.arguments.contains(restoreSelectionArgument) else { return }
-        if currentInputSourceID() == inputModeID {
-            logger.notice("MyIME 输入源已保持选中")
-            return
-        }
-        let filter = [kTISPropertyInputSourceID as String: inputModeID] as CFDictionary
-        guard let result = TISCreateInputSourceList(filter, true) else { return }
-        for case let source as TISInputSource in result.takeRetainedValue() as NSArray {
-            let status = TISSelectInputSource(source)
-            if status == noErr {
-                logger.notice("已恢复更新前选择的 MyIME 输入源")
-                return
-            }
-            logger.error("恢复 MyIME 输入源失败，状态码：\(status)")
-        }
-    }
-
     @discardableResult
     private static func register(_ appURL: URL, logger: Logger) -> Bool {
+        guard let modes = Bundle(url: appURL)?.object(forInfoDictionaryKey: "ComponentInputModeDict") as? [String: Any],
+              let modeList = modes["tsInputModeListKey"] as? [String: Any] else { return false }
+
         let status = TISRegisterInputSource(appURL as CFURL)
         if status != noErr {
             logger.error("输入法注册失败，状态码：\(status)")
             return false
         }
-        guard let modes = Bundle(url: appURL)?.object(forInfoDictionaryKey: "ComponentInputModeDict") as? [String: Any],
-              let modeList = modes["tsInputModeListKey"] as? [String: Any] else { return false }
         var enabledModeCount = 0
         for identifier in modeList.keys {
+            if isEnabledInputSource(identifier) {
+                enabledModeCount += 1
+                continue
+            }
             let filter = [kTISPropertyInputSourceID as String: identifier] as CFDictionary
             guard let result = TISCreateInputSourceList(filter, true) else { continue }
             for case let source as TISInputSource in result.takeRetainedValue() as NSArray {
@@ -79,25 +96,91 @@ enum SelfInstaller {
             }
         }
         guard enabledModeCount == modeList.count else { return false }
-        logger.notice("输入法已自动注册并启用")
+        logger.notice("MyIME 输入源已经注册并启用")
         return true
+    }
+
+    private static func isEnabledInputSource(_ identifier: String) -> Bool {
+        let filter = [kTISPropertyInputSourceID as String: identifier] as CFDictionary
+        guard let result = TISCreateInputSourceList(filter, true) else { return false }
+        for case let source as TISInputSource in result.takeRetainedValue() as NSArray {
+            guard let pointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled),
+                  let enabled = unsafeBitCast(pointer, to: CFBoolean?.self),
+                  CFBooleanGetValue(enabled) else { continue }
+            return true
+        }
+        return false
+    }
+
+    @discardableResult
+    private static func setInputSourceEnabled(_ enabled: Bool, logger: Logger) -> Bool {
+        guard let source = inputSource(withID: inputModeID) else {
+            if enabled {
+                return register(installedURL, logger: logger)
+            }
+            logger.error("找不到 MyIME 输入模式")
+            return false
+        }
+        let status = enabled ? TISEnableInputSource(source) : TISDisableInputSource(source)
+        if status != noErr {
+            logger.error("输入模式\(enabled ? "启用" : "停用")失败，状态码：\(status)")
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    private static func selectInputSource(logger: Logger) -> Bool {
+        guard let source = inputSource(withID: inputModeID) else {
+            logger.error("找不到 MyIME 输入模式")
+            return false
+        }
+        guard isEnabledInputSource(inputModeID) else {
+            logger.error("MyIME 尚未启用")
+            return false
+        }
+        let status = TISSelectInputSource(source)
+        if status != noErr {
+            logger.error("选择 MyIME 失败，状态码：\(status)")
+            return false
+        }
+        return true
+    }
+
+    private static func inputSource(withID identifier: String) -> TISInputSource? {
+        let filter = [kTISPropertyInputSourceID as String: identifier] as CFDictionary
+        guard let result = TISCreateInputSourceList(filter, true) else { return nil }
+        return (result.takeRetainedValue() as! [TISInputSource]).first
     }
 
     private static func currentInputSourceID() -> String? {
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
               let pointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return nil }
-        return Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue() as? String
+        return unsafeBitCast(pointer, to: CFString?.self) as String?
     }
 
     private static func installWithAdministratorPrivileges(from source: URL, to destination: URL) throws {
         let userCopy = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Input Methods/MyIME.app", isDirectory: true)
-        let command = [
-            "/bin/mkdir -p \(shellQuote(destination.deletingLastPathComponent().path))",
-            "/usr/bin/ditto \(shellQuote(source.path)) \(shellQuote(destination.path))",
-            "/usr/sbin/chown -R root:wheel \(shellQuote(destination.path))",
-            "/bin/rm -rf \(shellQuote(userCopy.path))"
-        ].joined(separator: " && ")
+        let installID = UUID().uuidString
+        let staging = destination.deletingLastPathComponent()
+            .appendingPathComponent(".MyIME-installing-\(installID).app", isDirectory: true)
+        let backup = destination.deletingLastPathComponent()
+            .appendingPathComponent(".MyIME-previous-\(installID).app", isDirectory: true)
+        let command = """
+        /bin/mkdir -p \(shellQuote(destination.deletingLastPathComponent().path)) &&
+        /bin/rm -rf \(shellQuote(staging.path)) \(shellQuote(backup.path)) &&
+        /usr/bin/ditto \(shellQuote(source.path)) \(shellQuote(staging.path)) &&
+        /usr/sbin/chown -R root:wheel \(shellQuote(staging.path)) &&
+        { if [ -e \(shellQuote(destination.path)) ]; then /bin/mv \(shellQuote(destination.path)) \(shellQuote(backup.path)); fi; } &&
+        { if /bin/mv \(shellQuote(staging.path)) \(shellQuote(destination.path)); then
+            /bin/rm -rf \(shellQuote(backup.path));
+          else
+            if [ -e \(shellQuote(backup.path)) ]; then /bin/mv \(shellQuote(backup.path)) \(shellQuote(destination.path)); fi;
+            exit 1;
+          fi; } &&
+        /bin/rm -rf \(shellQuote(userCopy.path))
+        """
         let escapedCommand = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")

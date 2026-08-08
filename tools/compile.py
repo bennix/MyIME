@@ -29,6 +29,10 @@ CREATE INDEX idx_pykey ON entries(py_key);
 CREATE INDEX idx_pyprefix ON entries(py_key, weight DESC);
 CREATE INDEX idx_initials ON entries(initials, weight DESC);
 CREATE TABLE language_ngram(ngram TEXT PRIMARY KEY, score REAL NOT NULL);
+CREATE TABLE traditional_map(
+  simplified TEXT PRIMARY KEY,
+  traditional TEXT NOT NULL
+);
 """
 
 SOURCES = (
@@ -59,8 +63,23 @@ def load(path: Path) -> list[tuple[str, str, str, str, int, int]]:
     return sorted(rows.values(), key=lambda row: (row[0], row[2]))
 
 
-def compile_database(source: Path, output: Path, language_model: Path | None = None) -> None:
+def load_opencc(paths: list[Path]) -> list[tuple[str, str]]:
+    mappings: dict[str, str] = {}
+    for path in paths:
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) != 2 or not fields[0] or not fields[1]:
+                raise ValueError(f"{path}:{number}: invalid OpenCC mapping")
+            mappings[fields[0]] = fields[1].split()[0]
+    return sorted(mappings.items())
+
+
+def compile_database(source: Path, output: Path, language_model: Path | None = None,
+                     opencc_paths: list[Path] | None = None) -> None:
     rows = load(source)
+    traditional_rows = load_opencc(opencc_paths or [])
     digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
     built_at = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
@@ -83,6 +102,7 @@ def compile_database(source: Path, output: Path, language_model: Path | None = N
                     raise ValueError(f"{language_model}:{number}: invalid language model row")
                 language_rows.append((fields[0], float(fields[1])))
             connection.executemany("INSERT INTO language_ngram VALUES(?,?)", language_rows)
+        connection.executemany("INSERT INTO traditional_map VALUES(?,?)", traditional_rows)
         manifest = {"sources": [
             {
                 "id": source_id,
@@ -92,10 +112,11 @@ def compile_database(source: Path, output: Path, language_model: Path | None = N
             for source_id, source_mask, license_name in SOURCES
         ]}
         connection.executemany("INSERT INTO meta VALUES(?,?)", [
-            ("schema_version", "2"), ("build_hash", digest),
+            ("schema_version", "3"), ("build_hash", digest),
             ("source_manifest", json.dumps(manifest, ensure_ascii=False, sort_keys=True)),
             ("entry_count", str(len(rows))),
             ("language_ngram_count", str(len(language_rows) if language_model else 0)),
+            ("traditional_mapping_count", str(len(traditional_rows))),
             ("built_at", built_at),
         ])
         connection.commit()
@@ -115,5 +136,6 @@ if __name__ == "__main__":
     parser.add_argument("input", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--language-model", type=Path)
+    parser.add_argument("--opencc", type=Path, nargs="*", default=[])
     arguments = parser.parse_args()
-    compile_database(arguments.input, arguments.output, arguments.language_model)
+    compile_database(arguments.input, arguments.output, arguments.language_model, arguments.opencc)

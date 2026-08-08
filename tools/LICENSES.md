@@ -100,6 +100,18 @@ corpora during the dictionary build and distributes only a compact, normalized t
 model used to rank homophonic sentence candidates. Original texts retain the rights and source
 terms of their respective Wikipedia, news, community, encyclopedia, and translation providers.
 
+## OpenCC conversion data
+
+- Project: Open Chinese Convert (OpenCC)
+- Source: https://github.com/BYVoid/OpenCC
+- Revision: `81223ed87ae53283ef518e2deac34b7971f8a39e`
+- Included data: `STPhrases.txt` and `STCharacters.txt`
+- License: Apache License 2.0
+
+MyIME compiles these mappings into `system.sqlite` only for simplified-to-traditional output
+conversion. They are not used as candidate words and do not replace MyIME's dictionary or
+learning engine.
+
 ## Sources retained locally but not bundled
 
 The following requested source snapshots are present under `build/sources`, but their repositories

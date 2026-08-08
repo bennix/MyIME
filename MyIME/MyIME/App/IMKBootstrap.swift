@@ -1,20 +1,30 @@
 import AppKit
+import Carbon
 import InputMethodKit
 import IMEKit
 import os
 import SwiftUI
 
-@MainActor
-final class NSManualApplication: NSApplication {
-    private let inputMethodDelegate = AppDelegate()
-
-    override init() {
-        super.init()
-        delegate = inputMethodDelegate
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+@main @MainActor
+struct MyIMEApplication {
+    static func main() {
+        let logger = Logger(subsystem: "fudan.miniS.MyIME", category: "command")
+        if SelfInstaller.performCommandIfRequested(logger: logger) {
+            return
+        }
+        let server: IMKServer? = if SelfInstaller.isRunningInstalledCopy {
+            IMKServer(
+                name: Bundle.main.object(forInfoDictionaryKey: "InputMethodConnectionName") as! String,
+                bundleIdentifier: Bundle.main.bundleIdentifier
+            )
+        } else {
+            nil
+        }
+        let app = NSApplication.shared
+        let delegate = AppDelegate(server: server)
+        app.delegate = delegate
+        app.setActivationPolicy(.accessory)
+        app.run()
     }
 }
 
@@ -51,13 +61,17 @@ final class IMEEnvironment {
     }
 }
 
-@main @MainActor
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var server: IMKServer?
+    private let server: IMKServer?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var shouldStartServer = true
     private let logger = Logger(subsystem: "fudan.miniS.MyIME", category: "bootstrap")
+
+    init(server: IMKServer?) {
+        self.server = server
+    }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         shouldStartServer = SelfInstaller.prepareInstalledCopy(logger: logger)
@@ -65,24 +79,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard shouldStartServer else { return }
-        _ = IMEEnvironment.shared
-        server = IMKServer(name: "MyIME_1_Connection", bundleIdentifier: Bundle.main.bundleIdentifier)
-        _ = SelfInstaller.ensureRegistered(logger: logger)
-        SelfInstaller.restoreSelectionIfRequested(logger: logger)
-        for delay in [1.0, 4.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [logger] in
-                _ = SelfInstaller.ensureRegistered(logger: logger)
-                SelfInstaller.restoreSelectionIfRequested(logger: logger)
-            }
+        guard server != nil else {
+            logger.error("已安装输入法未能建立 IMK 服务")
+            return
         }
-        NSApp.setActivationPolicy(.accessory)
+        _ = IMEEnvironment.shared
+        _ = SelfInstaller.ensureRegistered(logger: logger)
         installStatusMenu()
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(inputSourceChanged(_:)),
+            name: Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
+            object: nil,
+            suspensionBehavior: .deliverImmediately
+        )
+        updateStatusItemVisibility()
         if let message = IMEEnvironment.shared.resourceError {
             logger.error("\(message, privacy: .public)")
         }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    @objc private func inputSourceChanged(_ notification: Notification) {
+        updateStatusItemVisibility()
+        MyIMEInputController.finalizeStrandedCompositionIfNeeded()
+    }
+
+    private func updateStatusItemVisibility() {
+        statusItem?.isVisible = SelfInstaller.isCurrentInputSource
+    }
 
     private func installStatusMenu() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)

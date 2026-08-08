@@ -19,6 +19,18 @@ Selected dictionary data from Rime Ice by iDvel and contributors is included fro
 under GNU GPL version 3. Source: https://github.com/iDvel/rime-ice
 A copy of the license is included as GPL-3.0.txt.
 
+The macOS input-method lifecycle, input-source command model, and stranded-composition
+recovery in MyIME are informed by Rime Squirrel:
+https://github.com/rime/squirrel
+Squirrel is distributed under GNU GPL version 3. MyIME retains its own input engine,
+candidate interface, and learning implementation.
+
+Simplified-to-Traditional output conversion uses the STPhrases and STCharacters mapping data
+from Open Chinese Convert (OpenCC), revision 81223ed87ae53283ef518e2deac34b7971f8a39e:
+https://github.com/BYVoid/OpenCC
+OpenCC is distributed under the Apache License 2.0. The mapping is used only as an output
+conversion layer; MyIME continues to use its own bundled dictionary and learning engine.
+
 Additional derived terms are included from:
 - fcitx5-pinyin-zhwiki revision cb1073ce2042ab431c872da7699d62ed8b857cff
   (Unlicense; generated source terms subject to Wikimedia terms)

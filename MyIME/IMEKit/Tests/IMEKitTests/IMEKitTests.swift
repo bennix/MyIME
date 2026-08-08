@@ -49,6 +49,18 @@ private struct ContextStore: CandidateLookup {
 }
 
 @Suite("Engine") struct EngineTests {
+    @Test func traditionalConversionPrefersWholePhrases() {
+        let converter = TraditionalConverter(mappings: [
+            "头发": "頭髮",
+            "发": "發",
+            "后": "後",
+            "后台": "後臺",
+            "开": "開",
+        ])
+        #expect(converter.convert("头发后台开发") == "頭髮後臺開發")
+        #expect(converter.convert("MyIME 123") == "MyIME 123")
+    }
+
     @Test(arguments: [("nihao", "你好"), ("shijie", "世界"), ("beijing", "北京"), ("zhongguo", "中国"), ("woaini", "我爱你")])
     func golden(input: String, expected: String) {
         let output = Engine(store: store).update(input, prefs: EnginePrefs())
@@ -188,6 +200,8 @@ private struct ContextStore: CandidateLookup {
         let databasePath = ProcessInfo.processInfo.environment["MYIME_TEST_SYSTEM_DATABASE"]
             ?? packageDirectory.appending(path: "../MyIME/Resources/system.sqlite").standardizedFileURL.path
         let bundledStore = try #require(SQLiteStore(path: databasePath))
+        #expect(bundledStore.traditionalConverter.isAvailable)
+        #expect(bundledStore.traditionalConverter.convert("头发后台开发") == "頭髮後臺開發")
         let engine = Engine(store: bundledStore)
         let weather = engine.update("jintiantianqihenhao", prefs: EnginePrefs())
         let dinner = engine.update("womenmingtianyiqichifan", prefs: EnginePrefs())

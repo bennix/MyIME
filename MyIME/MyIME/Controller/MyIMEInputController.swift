@@ -5,7 +5,9 @@ import os
 
 @objc(MyIMEInputController)
 final class MyIMEInputController: IMKInputController {
+    private static weak var activatedController: MyIMEInputController?
     private let engine = IMEEnvironment.shared.engine
+    private let traditionalConverter = IMEEnvironment.shared.systemStore?.traditionalConverter ?? .empty
     private let candidateWindow = CandidateWindowController()
     private let inputModeIndicator = InputModeIndicatorController()
     private let logger = Logger(subsystem: "fudan.miniS.MyIME", category: "input")
@@ -42,11 +44,14 @@ final class MyIMEInputController: IMKInputController {
     override func activateServer(_ sender: Any!) {
         super.activateServer(sender)
         englishMode = false
-        shiftWasDown = false
+        shiftWasDown = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
         shiftUsedWithKey = false
         if let client = sender as? IMKTextInput {
             activeClient = client
-            logger.notice("输入法已激活，准备显示光标提示")
+            Self.activatedController = self
+            client.overrideKeyboard(withKeyboardNamed: "com.apple.keylayout.ABC")
+            let bundleID = client.bundleIdentifier() ?? "未知应用"
+            logger.notice("输入法已在 \(bundleID, privacy: .public) 激活")
             inputModeIndicator.show(client: client)
         } else {
             logger.error("输入法已激活，但没有可用的文本客户端")
@@ -66,7 +71,12 @@ final class MyIMEInputController: IMKInputController {
         candidateWindow.hide()
         shiftWasDown = false
         shiftUsedWithKey = false
-        defer { activeClient = nil }
+        defer {
+            if Self.activatedController === self {
+                Self.activatedController = nil
+            }
+            activeClient = nil
+        }
         guard let client = sender as? IMKTextInput else {
             super.deactivateServer(sender)
             return
@@ -75,6 +85,23 @@ final class MyIMEInputController: IMKInputController {
             commit(composedPhrase + raw, pinyin: [], client: client, learn: false)
         }
         super.deactivateServer(sender)
+    }
+
+    override func hidePalettes() {
+        inputModeIndicator.hide()
+        candidateWindow.hide()
+        super.hidePalettes()
+    }
+
+    static func finalizeStrandedCompositionIfNeeded() {
+        guard !SelfInstaller.isCurrentInputSource,
+              let controller = activatedController else { return }
+        if let client = controller.activeClient {
+            controller.deactivateServer(client)
+        } else {
+            controller.hidePalettes()
+            activatedController = nil
+        }
     }
 
     override func commitComposition(_ sender: Any!) {
@@ -195,9 +222,15 @@ final class MyIMEInputController: IMKInputController {
         highlighted = 0
         expandedCandidates = false
         hasNavigatedCandidates = false
-        let marked = composedPhrase + (output.preedit.isEmpty ? raw : output.preedit)
+        let marked = localized(composedPhrase, prefs: prefs) + (output.preedit.isEmpty ? raw : output.preedit)
         client.setMarkedText(marked, selectionRange: NSRange(location: marked.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
-        candidateWindow.update(candidates: visibleCandidates, highlighted: highlighted, prefs: prefs, expanded: expandedCandidates, client: client)
+        candidateWindow.update(
+            candidates: localizedCandidates(visibleCandidates, prefs: prefs),
+            highlighted: highlighted,
+            prefs: prefs,
+            expanded: expandedCandidates,
+            client: client
+        )
     }
 
     private var visibleCandidates: [Candidate] {
@@ -238,7 +271,8 @@ final class MyIMEInputController: IMKInputController {
     }
 
     private func commit(_ text: String, pinyin: [String], client: IMKTextInput, learn: Bool) {
-        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        let committedText = localized(text, prefs: PreferencesStore.load())
+        client.insertText(committedText, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         if learn { engine.commitLearning(word: text, pinyin: pinyin) }
         if pinyin.isEmpty { engine.breakPhraseLearningContext() }
@@ -313,10 +347,11 @@ final class MyIMEInputController: IMKInputController {
 
     private func refreshCandidateWindowPosition() {
         guard let client = activeClient else { return }
+        let prefs = PreferencesStore.load()
         candidateWindow.update(
-            candidates: visibleCandidates,
+            candidates: localizedCandidates(visibleCandidates, prefs: prefs),
             highlighted: highlighted,
-            prefs: PreferencesStore.load(),
+            prefs: prefs,
             expanded: expandedCandidates,
             client: client
         )
@@ -379,5 +414,22 @@ final class MyIMEInputController: IMKInputController {
     private func localizedPunctuation(for character: Character) -> String {
         let values: [Character: String] = [",": "，", ".": "。", "?": "？", "!": "！", ";": "；", ":": "：", "(": "（", ")": "）"]
         return values[character] ?? String(character)
+    }
+
+    private func localized(_ text: String, prefs: EnginePrefs) -> String {
+        prefs.outputTraditional ? traditionalConverter.convert(text) : text
+    }
+
+    private func localizedCandidates(_ candidates: [Candidate], prefs: EnginePrefs) -> [Candidate] {
+        guard prefs.outputTraditional, traditionalConverter.isAvailable else { return candidates }
+        return candidates.map { candidate in
+            Candidate(
+                id: candidate.id,
+                word: traditionalConverter.convert(candidate.word),
+                pinyinPath: candidate.pinyinPath,
+                score: candidate.score,
+                consumedLength: candidate.consumedLength
+            )
+        }
     }
 }

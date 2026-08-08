@@ -27,7 +27,7 @@ struct SettingsView: View {
             Picker("每页候选数", selection: $preferences.pageSize) {
                 ForEach(3...9, id: \.self) { Text("\($0)").tag($0) }
             }
-            Toggle("输出繁体（需要 OpenCC 数据，未安装时保持简体）", isOn: $preferences.outputTraditional)
+            Toggle("输出繁体（繁简共享 MyIME 词库）", isOn: $preferences.outputTraditional)
             LabeledContent("默认上屏键", value: "空格")
             LabeledContent("默认翻页键", value: "- / = 或 , / .")
             LabeledContent("中英文切换", value: "单击 Shift")

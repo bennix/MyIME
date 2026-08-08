@@ -59,6 +59,14 @@ baike2018qa_sample_sha256=fb414b435f5874e3362afc71e48b73ffdf8a65726f894b381527c6
 webtext2019zh_sample_sha256=da48defd9c1d4b98d33c55f635cfb6f2ff5ad7156432cbbd7ed7191dadeb9450
 translation2019zh_sha256=80bfcb35c8ae3137fd4e93f92c81f58c433d9864801d0082ee58dd3bcedf8b0f
 
+[opencc]
+url=https://github.com/BYVoid/OpenCC
+commit=81223ed87ae53283ef518e2deac34b7971f8a39e
+stphrases_sha256=7f121e46abc71c1055ebee0445be4a98290023124657b24557f1a36bd2dc144d
+stcharacters_sha256=81c27e6364fd164181276197b9215cf95f7f12a050aa207375248a5badf8d6fc
+license=Apache-2.0
+usage=simplified-to-traditional-output-conversion-only
+
 # Present in build/sources for future integration, but excluded from the bundled database until
 # upstream grants an explicit redistribution license, as required by docs/DICTIONARY_PIPELINE.md.
 [custom-pinyin-dictionary-unbundled]

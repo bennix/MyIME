@@ -17,21 +17,15 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>1.0.2</string>
     <key>CFBundleVersion</key>
-	<string>40</string>
+	<string>52</string>
     <key>InputMethodConnectionName</key>
     <string>MyIME_1_Connection</string>
     <key>InputMethodServerControllerClass</key>
     <string>MyIMEInputController</string>
     <key>InputMethodServerDelegateClass</key>
     <string>MyIMEInputController</string>
-    <key>tsInputMethodCharacterRepertoireKey</key>
-    <array>
-        <string>Hans</string>
-        <string>Hant</string>
-        <string>Latn</string>
-    </array>
     <key>tsInputMethodIconFileKey</key>
     <string>menu_icon.pdf</string>
     <key>ComponentInputModeDict</key>
@@ -42,8 +36,15 @@
             <dict>
                 <key>TISInputSourceID</key>
                 <string>fudan.miniS.inputmethod.MyIME.Chinese</string>
+                <key>TISIntendedLanguage</key>
+                <string>zh-Hans</string>
                 <key>tsInputModeAlternateMenuIconFileKey</key>
                 <string>menu_icon.pdf</string>
+                <key>tsInputModeCharacterRepertoireKey</key>
+                <array>
+                    <string>Hans</string>
+                    <string>Hant</string>
+                </array>
                 <key>tsInputModeDefaultStateKey</key>
                 <true/>
                 <key>tsInputModeIsVisibleKey</key>
@@ -59,7 +60,7 @@
                 <key>tsInputModePrimaryInScriptKey</key>
                 <true/>
                 <key>tsInputModeScriptKey</key>
-                <string>smSimpChinese</string>
+                <string>smUnicodeScript</string>
             </dict>
         </dict>
         <key>tsVisibleInputModeOrderedArrayKey</key>
@@ -74,7 +75,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSPrincipalClass</key>
-    <string>MyIME.NSManualApplication</string>
+    <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>TICapsLockLanguageSwitchCapable</key>

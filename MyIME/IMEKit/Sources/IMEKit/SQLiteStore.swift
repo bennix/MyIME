@@ -40,6 +40,7 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
     private var languageModel: [UInt64: Float] = [:]
     private var exactLookupCache: [String: [StoreEntry]] = [:]
     public let metadata: [String: String]
+    public let traditionalConverter: TraditionalConverter
 
     public init?(path: String) {
         var handle: OpaquePointer?
@@ -51,12 +52,13 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
         database = handle
         sqlite3_exec(handle, "PRAGMA query_only=ON; PRAGMA busy_timeout=100;", nil, nil, nil)
         metadata = Self.readMetadata(handle)
-        guard ["1", "2"].contains(metadata["schema_version"]) else {
+        guard ["1", "2", "3"].contains(metadata["schema_version"]) else {
             sqlite3_close(handle)
             database = nil
             return nil
         }
         languageModel = Self.readLanguageModel(handle)
+        traditionalConverter = Self.readTraditionalConverter(handle)
     }
 
     deinit {
@@ -193,6 +195,21 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
             result[String(cString: key)] = String(cString: value)
         }
         return result
+    }
+
+    private static func readTraditionalConverter(_ database: OpaquePointer) -> TraditionalConverter {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(database, "SELECT simplified,traditional FROM traditional_map", -1, &statement, nil) == SQLITE_OK else {
+            return .empty
+        }
+        var mappings: [String: String] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW,
+              let simplified = sqlite3_column_text(statement, 0),
+              let traditional = sqlite3_column_text(statement, 1) {
+            mappings[String(cString: simplified)] = String(cString: traditional)
+        }
+        return TraditionalConverter(mappings: mappings)
     }
 }
 
