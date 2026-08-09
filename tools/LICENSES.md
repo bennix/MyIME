@@ -105,12 +105,45 @@ terms of their respective Wikipedia, news, community, encyclopedia, and translat
 - Project: Open Chinese Convert (OpenCC)
 - Source: https://github.com/BYVoid/OpenCC
 - Revision: `81223ed87ae53283ef518e2deac34b7971f8a39e`
-- Included data: `STPhrases.txt` and `STCharacters.txt`
+- Included data: `STPhrases.txt`, `STCharacters.txt`, `TSPhrases.txt`, and `TSCharacters.txt`
 - License: Apache License 2.0
 
-MyIME compiles these mappings into `system.sqlite` only for simplified-to-traditional output
-conversion. They are not used as candidate words and do not replace MyIME's dictionary or
-learning engine.
+`ST*` mappings are compiled into `system.sqlite` for simplified-to-traditional output conversion.
+`TS*` mappings are used only at dictionary build time to normalize traditional source words to
+simplified before merge.
+
+## sc-dictionary
+
+- Source: https://github.com/samejack/sc-dictionary
+- Revision: `e057977284ed40f15765d3b97808e34fae98480e`
+- License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
+
+MyIME converts traditional forms to simplified, keeps words of length 2–12 with recoverable
+pinyin, and merges them into the offline candidate lexicon with attribution.
+
+## chinese-xinhua
+
+- Copyright (c) 2018 PWXCOO
+- Source: https://github.com/pwxcoo/chinese-xinhua
+- Revision: `fe6d6c2e8baa82187f4c96bbe042e43f96c05666`
+- License: MIT
+
+MyIME imports idioms (with provided pinyin), single-character readings, and common words from
+`data/idiom.json`, `data/word.json`, and `data/ci.json`. Xiehouyu punchlines are not imported as
+IME candidates.
+
+## ChineseSemanticKB
+
+- Author: Liu Huanyong
+- Source: https://github.com/liuhuanyong/ChineseSemanticKB
+- Revision: `2379ce44aee1a6aa696521efa4ae653df6dab0b9`
+- License: no SPDX / GitHub license field at the pinned revision
+
+The upstream README presents the data as an open Chinese semantic resource and asks consumers to
+respect the open-source intent rather than republish a secondary standalone database. MyIME
+extracts Chinese surface words from synonym, antonym, abbreviation, abstraction, and small closed
+class lists for offline IME recall only, with author attribution recorded here. If upstream later
+publishes a conflicting license, this source MUST be re-reviewed under `docs/DICTIONARY_PIPELINE.md`.
 
 ## Sources retained locally but not bundled
 

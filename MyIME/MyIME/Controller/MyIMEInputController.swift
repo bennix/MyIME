@@ -22,6 +22,7 @@ final class MyIMEInputController: IMKInputController {
     private var composedPhrase = ""
     private var composedPinyin: [String] = []
     private var hasNavigatedCandidates = false
+    private var showingSuggestions = false
     private weak var activeClient: (any IMKTextInput)?
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
@@ -135,14 +136,25 @@ final class MyIMEInputController: IMKInputController {
         }
         switch event.keyCode {
         case 49: // Space
-            guard !raw.isEmpty else {
+            if raw.isEmpty {
+                if showingSuggestions, !output.candidates.isEmpty {
+                    commitSuggestion(highlighted, client: client)
+                    return true
+                }
                 engine.breakPhraseLearningContext()
+                clearSuggestions()
                 return false
             }
             commitHighlighted(client)
             return true
         case 36, 76: // Return / keypad enter
-            guard !raw.isEmpty else { return false }
+            if raw.isEmpty {
+                if showingSuggestions, !output.candidates.isEmpty {
+                    commitSuggestion(highlighted, client: client)
+                    return true
+                }
+                return false
+            }
             if hasNavigatedCandidates {
                 commitHighlighted(client)
             } else {
@@ -150,12 +162,24 @@ final class MyIMEInputController: IMKInputController {
             }
             return true
         case 51: // Backspace
-            guard !raw.isEmpty else { return false }
+            if raw.isEmpty {
+                if showingSuggestions {
+                    clearSuggestions()
+                    return true
+                }
+                return false
+            }
             raw.removeLast()
             refresh(client)
             return true
         case 53: // Escape
-            guard !raw.isEmpty else { return false }
+            if raw.isEmpty {
+                if showingSuggestions {
+                    clearSuggestions()
+                    return true
+                }
+                return false
+            }
             reset(client)
             return true
         case 123: // Left
@@ -196,26 +220,33 @@ final class MyIMEInputController: IMKInputController {
             return true
         }
 
-        if let number = character.wholeNumberValue, !raw.isEmpty {
+        if let number = character.wholeNumberValue, (!raw.isEmpty || showingSuggestions) {
             let maximumNumber = expandedCandidates ? 6 : 9
             guard (1...maximumNumber).contains(number) else { return false }
             let activeRowStart = expandedCandidates ? highlighted / 6 * 6 : 0
-            selectVisible(activeRowStart + number - 1, client: client)
+            if showingSuggestions, raw.isEmpty {
+                commitSuggestion(activeRowStart + number - 1, client: client)
+            } else {
+                selectVisible(activeRowStart + number - 1, client: client)
+            }
             return true
         }
         if !raw.isEmpty, !character.isWhitespace, character.isASCII {
             commitHighlighted(client)
             client.insertText(localizedPunctuation(for: character), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
             engine.breakPhraseLearningContext()
+            clearSuggestions()
             return true
         }
         if character.isWhitespace || !character.isLetter {
             engine.breakPhraseLearningContext()
+            clearSuggestions()
         }
         return false
     }
 
     private func refresh(_ client: IMKTextInput) {
+        showingSuggestions = false
         let prefs = PreferencesStore.load()
         output = addingEnglishCandidates(to: engine.update(raw, prefs: prefs))
         page = 0
@@ -264,30 +295,75 @@ final class MyIMEInputController: IMKInputController {
             if !composedPinyin.isEmpty {
                 engine.commitUserPhrase(word: composedPhrase, pinyin: composedPinyin)
             }
-            commit(composedPhrase, pinyin: composedPinyin, client: client, learn: false)
+            commit(composedPhrase, pinyin: composedPinyin, client: client, learn: false, suggest: !composedPinyin.isEmpty)
         } else {
             refresh(client)
         }
     }
 
-    private func commit(_ text: String, pinyin: [String], client: IMKTextInput, learn: Bool) {
+    private func commit(_ text: String, pinyin: [String], client: IMKTextInput, learn: Bool, suggest: Bool = false) {
         let committedText = localized(text, prefs: PreferencesStore.load())
         client.insertText(committedText, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         if learn { engine.commitLearning(word: text, pinyin: pinyin) }
         if pinyin.isEmpty { engine.breakPhraseLearningContext() }
         raw = ""
-        output = EngineOutput(preedit: "", candidates: [], hasMore: false, raw: "")
         composedPhrase = ""
         composedPinyin = []
         hasNavigatedCandidates = false
+        expandedCandidates = false
+        if suggest || learn {
+            showSuggestions(client)
+        } else {
+            clearSuggestions()
+        }
+    }
+
+    private func showSuggestions(_ client: IMKTextInput) {
+        let prefs = PreferencesStore.load()
+        let suggestions = engine.suggestions(limit: prefs.pageSize)
+        guard !suggestions.isEmpty else {
+            clearSuggestions()
+            return
+        }
+        showingSuggestions = true
+        output = EngineOutput(preedit: "", candidates: suggestions, hasMore: false, raw: "")
+        page = 0
+        highlighted = 0
+        expandedCandidates = false
+        hasNavigatedCandidates = false
+        candidateWindow.update(
+            candidates: localizedCandidates(suggestions, prefs: prefs),
+            highlighted: highlighted,
+            prefs: prefs,
+            expanded: false,
+            client: client
+        )
+    }
+
+    private func clearSuggestions() {
+        showingSuggestions = false
+        output = EngineOutput(preedit: "", candidates: [], hasMore: false, raw: "")
+        page = 0
+        highlighted = 0
         candidateWindow.hide()
+    }
+
+    private func commitSuggestion(_ visibleIndex: Int, client: IMKTextInput) {
+        guard showingSuggestions, output.candidates.indices.contains(visibleIndex) else { return }
+        let suggestion = output.candidates[visibleIndex]
+        let prefs = PreferencesStore.load()
+        client.insertText(
+            localized(suggestion.word, prefs: prefs),
+            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+        )
+        engine.commitLearning(word: suggestion.word, pinyin: [])
+        showSuggestions(client)
     }
 
     private func reset(_ client: IMKTextInput) {
         engine.breakPhraseLearningContext()
         raw = ""
-        output = EngineOutput(preedit: "", candidates: [], hasMore: false, raw: "")
         page = 0
         highlighted = 0
         expandedCandidates = false
@@ -295,12 +371,12 @@ final class MyIMEInputController: IMKInputController {
         composedPinyin = []
         hasNavigatedCandidates = false
         client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
-        candidateWindow.hide()
+        clearSuggestions()
     }
 
     private func moveHighlight(_ delta: Int) -> Bool {
         let candidates = visibleCandidates
-        guard !raw.isEmpty, !candidates.isEmpty else { return false }
+        guard (!raw.isEmpty || showingSuggestions), !candidates.isEmpty else { return false }
         highlighted = min(max(0, highlighted + delta), candidates.count - 1)
         hasNavigatedCandidates = true
         candidateWindow.updateHighlight(highlighted)
@@ -308,7 +384,8 @@ final class MyIMEInputController: IMKInputController {
     }
 
     private func moveDown() -> Bool {
-        guard !raw.isEmpty else { return false }
+        guard !raw.isEmpty || showingSuggestions else { return false }
+        if showingSuggestions { return moveHighlight(1) }
         if !expandedCandidates {
             expandedCandidates = true
             page = 0
@@ -320,7 +397,9 @@ final class MyIMEInputController: IMKInputController {
     }
 
     private func moveUp() -> Bool {
-        guard !raw.isEmpty, expandedCandidates else { return false }
+        guard !raw.isEmpty || showingSuggestions else { return false }
+        if showingSuggestions { return moveHighlight(-1) }
+        guard expandedCandidates else { return false }
         return highlighted >= 6 ? moveHighlight(-6) : true
     }
 
@@ -333,7 +412,7 @@ final class MyIMEInputController: IMKInputController {
     }
 
     private func movePage(_ delta: Int) -> Bool {
-        guard !raw.isEmpty else { return false }
+        guard !raw.isEmpty || showingSuggestions else { return false }
         let pageSize = candidatePageSize
         let maxPage = max(0, (output.candidates.count - 1) / pageSize)
         let newPage = min(max(0, page + delta), maxPage)

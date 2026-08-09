@@ -18,6 +18,9 @@
 | `thesaurus` | Peter-JXL/thesaurus | 文本 | 英/术语 | 4 | 程序员术语（Java/Markdown…），保留大小写，特殊处理 |
 | `renfei_dict` | renfei/dict | 文本 | 简/繁混 | 3 | 搜狗分类词库整理版 |
 | `thuocl` | 清华大学开放中文词库（THUOCL） | 词语 + DF 词频 TSV | 简 | 2 | IT、财经、成语、地名、医学、法律等专业词汇 |
+| `sc_dictionary` | samejack/sc-dictionary | 一行一词 | 简/繁混 | 3 | 百万简繁词表；构建时 OpenCC t2s |
+| `chinese_xinhua` | pwxcoo/chinese-xinhua | JSON | 简 | 2 | 成语（自带拼音）、词语、单字读音 |
+| `chinese_semantic_kb` | liuhuanyong/ChineseSemanticKB | 关系文本 | 简 | 3 | 同义/反义/简称/抽象等表面词抽取；上游无 SPDX，见 `tools/LICENSES.md` |
 
 > **rank 语义**：合并冲突时，rank 小者（更权威）胜出为基准词形/拼音；见 §5。
 > **⚠ 许可证 MUST 逐一核实**：这些来源可能为 GPL/LGPL/CC BY-SA/MIT/Apache 等，含 **ShareAlike/Copyleft** 风险。实现方 MUST 在 `tools/LICENSES.md` 记录每个来源的**实际许可证 + 原始链接 + 抓取日期**，并确认与「非 App Store、Developer ID 分发」兼容；zhwiki 系 CC BY-SA，成品 MUST 附署名与相同方式共享声明。**不得凭记忆假定许可证。** 未核实通过的来源 MUST 从构建中排除（见 FOOLPROOFING G-DICT-LIC）。

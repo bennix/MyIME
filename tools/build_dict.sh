@@ -13,10 +13,15 @@ CEDICT="$BUILD_DIR/cedict_1_0_ts_utf-8_mdbg.txt.gz"
 JIEBA="$BUILD_DIR/jieba-dict.txt"
 RIME_COMMIT=569ff3bc65dd4aec0a26b33c49c8bbdfa8b5fd57
 THUOCL_COMMIT=a30ce79d895d01ab5132a5c74c29703ff7efb4cc
+SEMANTIC_KB_COMMIT=2379ce44aee1a6aa696521efa4ae653df6dab0b9
+SC_DICTIONARY_COMMIT=e057977284ed40f15765d3b97808e34fae98480e
+XINHUA_COMMIT=fe6d6c2e8baa82187f4c96bbe042e43f96c05666
 ZHWIKI="$BUILD_DIR/zhwiki-20260416.dict.yaml"
 OPENCC_COMMIT=81223ed87ae53283ef518e2deac34b7971f8a39e
 OPENCC_PHRASES="$BUILD_DIR/opencc-STPhrases.txt"
 OPENCC_CHARACTERS="$BUILD_DIR/opencc-STCharacters.txt"
+OPENCC_TS_PHRASES="$BUILD_DIR/opencc-TSPhrases.txt"
+OPENCC_TS_CHARACTERS="$BUILD_DIR/opencc-TSCharacters.txt"
 if [ ! -f "$CEDICT" ]; then
   curl -L --fail --silent --show-error \
     https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz \
@@ -50,6 +55,16 @@ if [ ! -f "$OPENCC_CHARACTERS" ]; then
     "https://raw.githubusercontent.com/BYVoid/OpenCC/$OPENCC_COMMIT/data/dictionary/STCharacters.txt" \
     -o "$OPENCC_CHARACTERS"
 fi
+if [ ! -f "$OPENCC_TS_PHRASES" ]; then
+  curl -L --fail --silent --show-error \
+    "https://raw.githubusercontent.com/BYVoid/OpenCC/$OPENCC_COMMIT/data/dictionary/TSPhrases.txt" \
+    -o "$OPENCC_TS_PHRASES"
+fi
+if [ ! -f "$OPENCC_TS_CHARACTERS" ]; then
+  curl -L --fail --silent --show-error \
+    "https://raw.githubusercontent.com/BYVoid/OpenCC/$OPENCC_COMMIT/data/dictionary/TSCharacters.txt" \
+    -o "$OPENCC_TS_CHARACTERS"
+fi
 if [ ! -d "$BUILD_DIR/Jinghang-Dictionary/.git" ]; then
   git clone --quiet https://github.com/kkhkl/Jinghang-Dictionary.git "$BUILD_DIR/Jinghang-Dictionary"
 fi
@@ -62,6 +77,18 @@ if [ ! -d "$BUILD_DIR/THUOCL/.git" ]; then
   git clone --quiet https://github.com/thunlp/THUOCL.git "$BUILD_DIR/THUOCL"
 fi
 git -C "$BUILD_DIR/THUOCL" checkout --quiet "$THUOCL_COMMIT"
+if [ ! -d "$BUILD_DIR/ChineseSemanticKB/.git" ]; then
+  git clone --quiet https://github.com/liuhuanyong/ChineseSemanticKB.git "$BUILD_DIR/ChineseSemanticKB"
+fi
+git -C "$BUILD_DIR/ChineseSemanticKB" checkout --quiet "$SEMANTIC_KB_COMMIT"
+if [ ! -d "$BUILD_DIR/sc-dictionary/.git" ]; then
+  git clone --quiet https://github.com/samejack/sc-dictionary.git "$BUILD_DIR/sc-dictionary"
+fi
+git -C "$BUILD_DIR/sc-dictionary" checkout --quiet "$SC_DICTIONARY_COMMIT"
+if [ ! -d "$BUILD_DIR/chinese-xinhua/.git" ]; then
+  git clone --quiet https://github.com/pwxcoo/chinese-xinhua.git "$BUILD_DIR/chinese-xinhua"
+fi
+git -C "$BUILD_DIR/chinese-xinhua" checkout --quiet "$XINHUA_COMMIT"
 echo "d722c784cab3b3b346d09672aab46533f95e0e0c163d6040854ef76ca8e9504a  $CEDICT" | shasum -a 256 -c
 echo "7197c3211ddd98962b036cdf40324d1ea2bfaa12bd028e68faa70111a88e12a8  $JIEBA" | shasum -a 256 -c
 echo "0f21c76937ac42973dba4d8d26cfb80f03e0da0069af01ad2496fc5cfc9bb36d  $BUILD_DIR/rime-ice-base.dict.yaml" | shasum -a 256 -c
@@ -79,18 +106,25 @@ MERGED="$BUILD_DIR/merged.tsv"
     "$BUILD_DIR/rime-ice-others.dict.yaml" "$BUILD_DIR/rime-ice-8105.dict.yaml" "$ZHWIKI" \
   --word-list-dir "8:$BUILD_DIR/Jinghang-Dictionary/中文词库语料" \
     "32:$BUILD_DIR/renfei-dict/sogou" \
-  --thuocl-dir "$BUILD_DIR/THUOCL/data"
+  --thuocl-dir "$BUILD_DIR/THUOCL/data" \
+  --sc-dictionary "$BUILD_DIR/sc-dictionary/main.txt" \
+  --xinhua-dir "$BUILD_DIR/chinese-xinhua/data" \
+  --semantic-kb-dir "$BUILD_DIR/ChineseSemanticKB/dict" \
+  --opencc-ts-phrases "$OPENCC_TS_PHRASES" \
+  --opencc-ts-characters "$OPENCC_TS_CHARACTERS"
 CORPUS_DIR="$ROOT_DIR/build/sources/brightmart"
 "$PYTHON_BIN" "$SCRIPT_DIR/build_language_model.py" \
   "$MERGED" "$BUILD_DIR/language_model.tsv" \
+  --unigram-output "$BUILD_DIR/word_unigram.tsv" \
+  --bigram-output "$BUILD_DIR/word_bigram.tsv" \
   --corpus "$CORPUS_DIR/wiki2019zh.download" \
     "$CORPUS_DIR/news2016zh.sample.part" \
-    "$CORPUS_DIR/baike2018qa.sample.part" \
-    "$CORPUS_DIR/webtext2019zh.sample.part" \
-    "$CORPUS_DIR/translation2019zh.download"
+    "$CORPUS_DIR/baike2018qa.sample.part"
 "$PYTHON_BIN" "$SCRIPT_DIR/compile.py" \
   "$MERGED" \
   "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite" \
   --language-model "$BUILD_DIR/language_model.tsv" \
+  --unigram-model "$BUILD_DIR/word_unigram.tsv" \
+  --bigram-model "$BUILD_DIR/word_bigram.tsv" \
   --opencc "$OPENCC_PHRASES" "$OPENCC_CHARACTERS"
 "$PYTHON_BIN" "$SCRIPT_DIR/verify.py" "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite"

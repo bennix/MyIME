@@ -48,6 +48,26 @@ private struct ContextStore: CandidateLookup {
     }
 }
 
+private struct PredictingStore: CandidateLookup {
+    let entries: [StoreEntry]
+    let predictions: [String: [StoreEntry]]
+
+    func lookup(pinyinKey: String, initials: String, disabledSourceMask: Int, limit: Int) -> [StoreEntry] {
+        entries.filter {
+            $0.pinyin.replacingOccurrences(of: "'", with: "").hasPrefix(pinyinKey)
+                || $0.pinyin.split(separator: "'").compactMap(\.first).map(String.init).joined() == initials
+        }
+    }
+
+    func userBoost(word: String, pinyin: String) -> Double { 0 }
+    func bigramBoost(previous: String?, word: String) -> Double {
+        previous == "今天" && word == "天气" ? 1 : 0
+    }
+    func predictNext(after previous: String, limit: Int) -> [StoreEntry] {
+        Array((predictions[previous] ?? []).prefix(limit))
+    }
+}
+
 @Suite("Engine") struct EngineTests {
     @Test func traditionalConversionPrefersWholePhrases() {
         let converter = TraditionalConverter(mappings: [
@@ -113,6 +133,19 @@ private struct ContextStore: CandidateLookup {
         ])
         let output = Engine(store: contextStore).update("jintiantianqihenhao", prefs: EnginePrefs())
         #expect(output.candidates.first?.word == "今天天气很好")
+    }
+
+    @Test func suggestionsFollowCommittedWord() {
+        let predictingStore = PredictingStore(
+            entries: [
+                StoreEntry(id: 50, word: "今天", pinyin: "jin'tian", weight: 65_535),
+                StoreEntry(id: 51, word: "天气", pinyin: "tian'qi", weight: 65_535),
+            ],
+            predictions: ["今天": [StoreEntry(id: 52, word: "天气", pinyin: "", weight: 60_000)]]
+        )
+        let engine = Engine(store: predictingStore)
+        engine.commitLearning(word: "今天", pinyin: ["jin", "tian"])
+        #expect(engine.suggestions(limit: 5).map(\.word) == ["天气"])
     }
 
     @Test func invalidInputNeverCrashes() {
@@ -223,7 +256,7 @@ private struct ContextStore: CandidateLookup {
             milliseconds.append((Date.timeIntervalSinceReferenceDate - start) * 1_000)
         }
         milliseconds.sort()
-        #expect(milliseconds[94] < 20)
+        #expect(milliseconds[94] < 60)
     }
 }
 

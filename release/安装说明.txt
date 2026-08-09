@@ -1,8 +1,9 @@
-MyIME 1.0.3 安装说明
+MyIME 1.0.4 安装说明
 
 1. 双击 MyIME.app。
 2. 按照系统提示输入管理员密码，MyIME 会自动安装和注册。
-3. 在 macOS 菜单栏的输入法菜单中选择“MyIME”。
+3. 在「系统设置 → 键盘 → 输入法」中，从「简体中文」添加 MyIME（若列表中已有可直接切换）。
+4. 在 macOS 菜单栏的输入法菜单中选择“MyIME”。
 
 当前版本使用 Apple Development 证书签名，尚未完成 Apple 公证。
 如果 macOS 阻止首次打开，请按住 Control 点击 MyIME.app，然后选择“打开”。

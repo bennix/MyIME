@@ -21,8 +21,10 @@ public protocol CandidateLookup: Sendable {
     func lookup(pinyinKey: String, initials: String, disabledSourceMask: Int, limit: Int) -> [StoreEntry]
     func lookupExact(pinyinKey: String, disabledSourceMask: Int, limit: Int) -> [StoreEntry]
     func userBoost(word: String, pinyin: String) -> Double
+    func unigramBoost(word: String) -> Double
     func bigramBoost(previous: String?, word: String) -> Double
     func sequenceBoost(prefix: String, word: String) -> Double
+    func predictNext(after previous: String, limit: Int) -> [StoreEntry]
 }
 
 public extension CandidateLookup {
@@ -31,13 +33,18 @@ public extension CandidateLookup {
             .filter { $0.pinyin.replacingOccurrences(of: "'", with: "") == pinyinKey }
     }
 
+    func unigramBoost(word: String) -> Double { 0 }
     func sequenceBoost(prefix: String, word: String) -> Double { 0 }
+    func predictNext(after previous: String, limit: Int) -> [StoreEntry] { [] }
 }
 
 public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
     private var database: OpaquePointer?
     private let lock = NSLock()
     private var languageModel: [UInt64: Float] = [:]
+    private var wordUnigrams: [UInt64: Float] = [:]
+    private var wordBigrams: [UInt64: Float] = [:]
+    private var predictions: [UInt64: [StoreEntry]] = [:]
     private var exactLookupCache: [String: [StoreEntry]] = [:]
     public let metadata: [String: String]
     public let traditionalConverter: TraditionalConverter
@@ -52,12 +59,16 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
         database = handle
         sqlite3_exec(handle, "PRAGMA query_only=ON; PRAGMA busy_timeout=100;", nil, nil, nil)
         metadata = Self.readMetadata(handle)
-        guard ["1", "2", "3"].contains(metadata["schema_version"]) else {
+        guard ["1", "2", "3", "4"].contains(metadata["schema_version"]) else {
             sqlite3_close(handle)
             database = nil
             return nil
         }
         languageModel = Self.readLanguageModel(handle)
+        let wordModel = Self.readWordModel(handle)
+        wordUnigrams = wordModel.unigrams
+        wordBigrams = wordModel.bigrams
+        predictions = wordModel.predictions
         traditionalConverter = Self.readTraditionalConverter(handle)
     }
 
@@ -145,7 +156,21 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
     }
 
     public func userBoost(word: String, pinyin: String) -> Double { 0 }
-    public func bigramBoost(previous: String?, word: String) -> Double { 0 }
+
+    public func unigramBoost(word: String) -> Double {
+        Double(wordUnigrams[Self.stableHash(word)] ?? 0)
+    }
+
+    public func bigramBoost(previous: String?, word: String) -> Double {
+        guard let previous, !previous.isEmpty else { return 0 }
+        return Double(wordBigrams[Self.stableHash(previous + "\u{0}" + word)] ?? 0)
+    }
+
+    public func predictNext(after previous: String, limit: Int) -> [StoreEntry] {
+        guard !previous.isEmpty, limit > 0 else { return [] }
+        let values = predictions[Self.stableHash(previous)] ?? []
+        return Array(values.prefix(limit))
+    }
 
     public func sequenceBoost(prefix: String, word: String) -> Double {
         guard !prefix.isEmpty, !word.isEmpty, !languageModel.isEmpty else { return 0 }
@@ -182,6 +207,59 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
             result[stableHash(String(cString: ngram))] = Float(sqlite3_column_double(statement, 1))
         }
         return result
+    }
+
+    private static func readWordModel(_ database: OpaquePointer) -> (
+        unigrams: [UInt64: Float],
+        bigrams: [UInt64: Float],
+        predictions: [UInt64: [StoreEntry]]
+    ) {
+        var unigrams: [UInt64: Float] = [:]
+        var bigrams: [UInt64: Float] = [:]
+        var predictions: [UInt64: [StoreEntry]] = [:]
+
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(database, "SELECT word,score FROM word_unigram", -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let word = sqlite3_column_text(statement, 0) {
+                unigrams[stableHash(String(cString: word))] = Float(sqlite3_column_double(statement, 1))
+            }
+        }
+        sqlite3_finalize(statement)
+
+        statement = nil
+        if sqlite3_prepare_v2(
+            database,
+            "SELECT prev,word,score FROM word_bigram ORDER BY prev ASC, score DESC, word ASC",
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK {
+            var predictionID: Int64 = -1
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let previousText = sqlite3_column_text(statement, 0),
+                  let wordText = sqlite3_column_text(statement, 1) {
+                let previous = String(cString: previousText)
+                let word = String(cString: wordText)
+                let score = Float(sqlite3_column_double(statement, 2))
+                bigrams[stableHash(previous + "\u{0}" + word)] = score
+                guard word.count >= 2 else { continue }
+                let key = stableHash(previous)
+                var bucket = predictions[key] ?? []
+                if bucket.count < 12 {
+                    predictionID -= 1
+                    bucket.append(StoreEntry(
+                        id: predictionID,
+                        word: word,
+                        pinyin: "",
+                        weight: Int((score * 65_535).rounded())
+                    ))
+                    predictions[key] = bucket
+                }
+            }
+        }
+        sqlite3_finalize(statement)
+        return (unigrams, bigrams, predictions)
     }
 
     private static func readMetadata(_ database: OpaquePointer) -> [String: String] {

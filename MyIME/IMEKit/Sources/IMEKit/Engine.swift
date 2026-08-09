@@ -45,12 +45,15 @@ public final class Engine: IMEEngine, @unchecked Sendable {
                 let frequency = Double(entry.weight) / 65_535.0
                 let learnedPhraseBoost = entry.id < 0 ? frequency : 0
                 let user = learnedPhraseBoost + (userStore?.boost(word: entry.word, pinyin: entry.pinyin) ?? 0) + store.userBoost(word: entry.word, pinyin: entry.pinyin)
-                let context = (userStore?.bigram(previous: previous, word: entry.word) ?? 0) + store.bigramBoost(previous: previous, word: entry.word)
+                let context = (userStore?.bigram(previous: previous, word: entry.word) ?? 0)
+                    + store.bigramBoost(previous: previous, word: entry.word) * 4.0
+                let unigram = store.unigramBoost(word: entry.word)
                 let incompleteRatio = 1 - Double(consumedLength) / Double(inputLength)
                 let score = prefs.frequencyWeight * frequency
                     + prefs.userWeight * user
                     + prefs.lengthWeight * min(Double(entry.word.count), 6) / 6.0
                     + prefs.contextWeight * context
+                    + 0.28 * unigram
                     - prefs.fuzzyPenalty * Double(path.fuzzyMatches)
                     - prefs.partialPenalty * Double(path.partialCount + fallbackPenalty)
                     - 0.45 * max(0, incompleteRatio)
@@ -60,21 +63,21 @@ public final class Engine: IMEEngine, @unchecked Sendable {
             }
         }
         let sentences = paths.prefix(2)
-            .flatMap { sentenceCandidates(for: $0, previous: previous, prefs: prefs, limit: 5) }
+            .flatMap { sentenceCandidates(for: $0, previous: previous, prefs: prefs, limit: 6) }
             .sorted {
                 if $0.score != $1.score { return $0.score > $1.score }
                 return $0.word < $1.word
             }
         let topScore = best.values.map(\.score).max() ?? 0
         var seenSentences = Set<String>()
-        for (index, sentence) in sentences.filter({ seenSentences.insert($0.word).inserted }).prefix(5).enumerated() {
+        for (index, sentence) in sentences.filter({ seenSentences.insert($0.word).inserted }).prefix(6).enumerated() {
             let key = sentence.word + "\u{0}" + sentence.pinyinPath.joined(separator: "'")
             guard best[key] == nil else { continue }
             best[key] = Candidate(
                 id: sentence.id,
                 word: sentence.word,
                 pinyinPath: sentence.pinyinPath,
-                score: topScore + Double(sentences.count - index),
+                score: topScore + Double(sentences.count - index) + sentence.score * 0.01,
                 consumedLength: sentence.consumedLength
             )
         }
@@ -92,6 +95,45 @@ public final class Engine: IMEEngine, @unchecked Sendable {
         )
     }
 
+    public func suggestions(limit: Int = 9) -> [Candidate] {
+        let previous = stateLock.withLock { previousCommitted }
+        guard let previous, !previous.isEmpty else { return [] }
+        var anchors = [previous]
+        if previous.count > 2 { anchors.append(String(previous.suffix(2))) }
+        if previous.count > 1 { anchors.append(String(previous.suffix(1))) }
+
+        var seen = Set<String>()
+        var ranked: [(word: String, score: Double)] = []
+        for anchor in anchors {
+            for entry in store.predictNext(after: anchor, limit: limit * 3) {
+                // Association chips should be usable words, not function-word residue from corpora.
+                guard entry.word.count >= 2, seen.insert(entry.word).inserted else { continue }
+                let score = Double(entry.weight) / 65_535.0
+                    + store.bigramBoost(previous: anchor, word: entry.word) * 2.0
+                    + store.unigramBoost(word: entry.word) * 0.55
+                ranked.append((entry.word, score))
+            }
+            if ranked.count >= limit { break }
+        }
+
+        return ranked
+            .sorted {
+                if $0.score != $1.score { return $0.score > $1.score }
+                return $0.word < $1.word
+            }
+            .prefix(limit)
+            .enumerated()
+            .map { index, item in
+                Candidate(
+                    id: Int64.min / 4 + Int64(index),
+                    word: item.word,
+                    pinyinPath: [],
+                    score: item.score,
+                    consumedLength: 0
+                )
+            }
+    }
+
     private struct SentenceHypothesis {
         let word: String
         let score: Double
@@ -100,7 +142,7 @@ public final class Engine: IMEEngine, @unchecked Sendable {
     }
 
     private func sentenceCandidates(for path: SegmentationPath, previous: String?, prefs: EnginePrefs, limit: Int) -> [Candidate] {
-        guard path.syllables.count > 1, path.syllables.count <= 12, path.partialCount == 0 else { return [] }
+        guard path.syllables.count > 1, path.syllables.count <= 14, path.partialCount == 0 else { return [] }
         let fullKey = path.syllables.joined()
         let hasExactPhrase = !(store.lookupExact(
             pinyinKey: fullKey,
@@ -123,7 +165,7 @@ public final class Engine: IMEEngine, @unchecked Sendable {
                         if $0.word != $1.word { return $0.word < $1.word }
                         return $0.id < $1.id
                     }
-                    .prefix(6)
+                    .prefix(10)
                 for hypothesis in beams[cursor] {
                     for entry in entries {
                         let frequency = Double(entry.weight) / 65_535.0
@@ -131,14 +173,21 @@ public final class Engine: IMEEngine, @unchecked Sendable {
                             + store.userBoost(word: entry.word, pinyin: entry.pinyin)
                         let contextPrevious = hypothesis.lastWord ?? previous
                         let context = (userStore?.bigram(previous: contextPrevious, word: entry.word) ?? 0)
-                            + store.bigramBoost(previous: contextPrevious, word: entry.word)
+                            + store.bigramBoost(previous: contextPrevious, word: entry.word) * 5.0
+                        let unigram = store.unigramBoost(word: entry.word)
                         let sequence = store.sequenceBoost(prefix: hypothesis.word, word: entry.word)
+                        let syllableSpan = Double(end - cursor)
+                        // Prefer multi-syllable dictionary hits over high-frequency single characters.
+                        let multiSyllableBonus = syllableSpan > 1 ? 0.65 * (syllableSpan - 1) : 0
+                        let unigramWeight = syllableSpan > 1 ? 0.45 : 0.18
                         let score = hypothesis.score
-                            + frequency * Double(end - cursor)
+                            + frequency * syllableSpan
                             + prefs.userWeight * user
                             + prefs.contextWeight * context
+                            + unigramWeight * unigram * syllableSpan
                             + 0.35 * sequence
-                            - 0.5
+                            + multiSyllableBonus
+                            - 0.55
                         beams[end].append(SentenceHypothesis(
                             word: hypothesis.word + entry.word,
                             score: score,
@@ -152,7 +201,7 @@ public final class Engine: IMEEngine, @unchecked Sendable {
                     if $0.pieces != $1.pieces { return $0.pieces < $1.pieces }
                     return $0.word < $1.word
                 }
-                if beams[end].count > 8 { beams[end].removeSubrange(8...) }
+                if beams[end].count > 10 { beams[end].removeSubrange(10...) }
             }
         }
         var seen = Set<String>()
