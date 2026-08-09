@@ -98,22 +98,46 @@ public final class Engine: IMEEngine, @unchecked Sendable {
     public func suggestions(limit: Int = 9) -> [Candidate] {
         let previous = stateLock.withLock { previousCommitted }
         guard let previous, !previous.isEmpty else { return [] }
+
+        // Prefer the exact committed phrase. Single-character suffix anchors pull in web junk
+        // (今天 → 天 → 的/了) and drown useful continuations.
         var anchors = [previous]
         if previous.count > 2 { anchors.append(String(previous.suffix(2))) }
-        if previous.count > 1 { anchors.append(String(previous.suffix(1))) }
 
         var seen = Set<String>()
         var ranked: [(word: String, score: Double)] = []
-        for anchor in anchors {
-            for entry in store.predictNext(after: anchor, limit: limit * 3) {
-                // Association chips should be usable words, not function-word residue from corpora.
-                guard entry.word.count >= 2, seen.insert(entry.word).inserted else { continue }
-                let score = Double(entry.weight) / 65_535.0
-                    + store.bigramBoost(previous: anchor, word: entry.word) * 2.0
-                    + store.unigramBoost(word: entry.word) * 0.55
-                ranked.append((entry.word, score))
+        func consider(word: String, anchor: String, base: Double, exactAnchor: Bool) {
+            guard word.count >= 2, !Self.isLowQualityAssociation(word), seen.insert(word).inserted else { return }
+            let user = userStore?.bigram(previous: previous, word: word) ?? 0
+            let system = store.bigramBoost(previous: anchor, word: word)
+            let sequence = store.sequenceBoost(prefix: previous, word: word)
+            let unigram = store.unigramBoost(word: word)
+            // User intent and exact-phrase bigrams dominate; raw unigram often rewards content-farm heads.
+            let score = base
+                + user * 2.8
+                + system * (exactAnchor ? 3.2 : 1.1)
+                + sequence * 0.9
+                + unigram * 0.12
+            ranked.append((word, score))
+        }
+
+        for entry in userStore?.predictNext(after: previous, limit: limit * 2) ?? [] {
+            consider(word: entry.word, anchor: previous, base: Double(entry.weight) / 65_535.0 + 1.5, exactAnchor: true)
+        }
+        for word in AssociationSeeds.continuations(after: previous) {
+            consider(word: word, anchor: previous, base: 1.8, exactAnchor: true)
+        }
+        for (index, anchor) in anchors.enumerated() {
+            let exactAnchor = index == 0
+            for entry in store.predictNext(after: anchor, limit: limit * 4) {
+                consider(
+                    word: entry.word,
+                    anchor: anchor,
+                    base: Double(entry.weight) / 65_535.0 * (exactAnchor ? 0.45 : 0.2),
+                    exactAnchor: exactAnchor
+                )
             }
-            if ranked.count >= limit { break }
+            if exactAnchor, ranked.count >= limit { break }
         }
 
         return ranked
@@ -132,6 +156,14 @@ public final class Engine: IMEEngine, @unchecked Sendable {
                     consumedLength: 0
                 )
             }
+    }
+
+    private static func isLowQualityAssociation(_ word: String) -> Bool {
+        let bannedFragments = [
+            "小编", "给大家", "为大家", "特价", "大盘", "点击", "点赞", "关注", "转发",
+            "头条", "链接", "阅读原文", "扫码", "微信号",
+        ]
+        return bannedFragments.contains { word.contains($0) }
     }
 
     private struct SentenceHypothesis {
@@ -265,6 +297,39 @@ public final class Engine: IMEEngine, @unchecked Sendable {
 
     public func breakPhraseLearningContext() {
         stateLock.withLock { recentPhrase = nil }
+    }
+}
+
+/// High-frequency, intent-oriented continuations that corpus bigrams often miss
+/// (e.g. webtext strongly prefers 今天→小编 over 今天→天气).
+enum AssociationSeeds {
+    private static let table: [String: [String]] = [
+        "今天": ["天气", "早上", "晚上", "中午", "怎么样"],
+        "明天": ["天气", "早上", "晚上", "一起", "再见"],
+        "昨天": ["晚上", "已经", "发生", "天气"],
+        "现在": ["开始", "可以", "时间", "感觉"],
+        "因为": ["所以", "这样", "天气", "工作"],
+        "所以": ["我们", "今天", "决定", "需要"],
+        "可以": ["帮助", "开始", "试试", "理解"],
+        "我们": ["一起", "需要", "可以", "今天"],
+        "你们": ["好的", "可以", "觉得", "需要"],
+        "他们": ["觉得", "已经", "可能", "需要"],
+        "这个": ["问题", "方案", "事情", "想法"],
+        "那个": ["问题", "时候", "地方", "想法"],
+        "真的": ["很好", "喜欢", "不错", "可以"],
+        "非常": ["喜欢", "感谢", "重要", "开心"],
+        "开始": ["工作", "学习", "输入", "吧"],
+        "希望": ["大家", "你能", "明天", "顺利"],
+        "觉得": ["不错", "可以", "很好", "应该"],
+        "应该": ["可以", "没问题", "注意", "这样"],
+        "没有": ["问题", "办法", "关系", "时间"],
+        "不是": ["问题", "这样", "很好", "故意"],
+    ]
+
+    static func continuations(after previous: String) -> [String] {
+        if let exact = table[previous] { return exact }
+        if previous.count > 2, let suffix = table[String(previous.suffix(2))] { return suffix }
+        return []
     }
 }
 

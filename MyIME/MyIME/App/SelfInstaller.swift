@@ -5,6 +5,7 @@ import os
 enum SelfInstaller {
     private static let installedURL = URL(fileURLWithPath: "/Library/Input Methods/MyIME.app", isDirectory: true)
     private static let inputModeID = "fudan.miniS.inputmethod.MyIME.Chinese"
+    private static let needsClientRebindKey = "NeedsClientRebind"
 
     static var isRunningInstalledCopy: Bool {
         Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
@@ -50,6 +51,8 @@ enum SelfInstaller {
 
         do {
             try installWithAdministratorPrivileges(from: current, to: installed)
+            // 旧进程被 kill 后，仍选中 MyIME 的 App 会持有死会话；新进程注册完后重绑前台客户端。
+            UserDefaults.standard.set(true, forKey: needsClientRebindKey)
 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -114,6 +117,7 @@ enum SelfInstaller {
                 return false
             }
             UserDefaults.standard.set(bundleVersion, forKey: versionKey)
+            UserDefaults.standard.set(true, forKey: needsClientRebindKey)
         }
         // 必须先启用父输入法：重启后系统启用列表可能被清空，
         // 而子模式只有在父源已启用时才能真正被启用（否则静默失败）。
@@ -147,7 +151,43 @@ enum SelfInstaller {
         }
         guard enabledModeCount == modeList.count else { return false }
         logger.notice("MyIME 输入源已经注册并启用")
+        if UserDefaults.standard.bool(forKey: needsClientRebindKey) {
+            rebindFrontmostClient(logger: logger)
+            UserDefaults.standard.set(false, forKey: needsClientRebindKey)
+        }
         return true
+    }
+
+    /// 前台 App 在 MyIME 进程被替换后常持有失效 IMK 连接。短暂切到 ABC 再切回，强制重连。
+    private static func rebindFrontmostClient(logger: Logger) {
+        guard isCurrentInputSource else { return }
+        guard let myIME = inputSource(withID: inputModeID) else { return }
+        let abcCandidates = ["com.apple.keylayout.ABC", "com.apple.keylayout.US"]
+        var fallback: TISInputSource?
+        for identifier in abcCandidates {
+            let filter = [kTISPropertyInputSourceID as String: identifier] as CFDictionary
+            if let list = TISCreateInputSourceList(filter, true),
+               let source = (list.takeRetainedValue() as! [TISInputSource]).first {
+                fallback = source
+                break
+            }
+        }
+        guard let fallback else {
+            logger.error("找不到 ABC/US 键盘，跳过客户端重绑")
+            return
+        }
+        let away = TISSelectInputSource(fallback)
+        if away != noErr {
+            logger.error("切换到后备键盘失败，状态码：\(away)")
+            return
+        }
+        Thread.sleep(forTimeInterval: 0.2)
+        let back = TISSelectInputSource(myIME)
+        if back != noErr {
+            logger.error("重选 MyIME 失败，状态码：\(back)")
+            return
+        }
+        logger.notice("已重绑前台输入客户端")
     }
 
     private static func isEnabledInputSource(_ identifier: String) -> Bool {

@@ -145,7 +145,51 @@ private struct PredictingStore: CandidateLookup {
         )
         let engine = Engine(store: predictingStore)
         engine.commitLearning(word: "今天", pinyin: ["jin", "tian"])
-        #expect(engine.suggestions(limit: 5).map(\.word) == ["天气"])
+        #expect(engine.suggestions(limit: 5).map(\.word).contains("天气"))
+    }
+
+    @Test func suggestionsSuppressContentFarmAndPreferSeeds() {
+        let predictingStore = PredictingStore(
+            entries: [
+                StoreEntry(id: 50, word: "今天", pinyin: "jin'tian", weight: 65_535),
+            ],
+            predictions: [
+                "今天": [
+                    StoreEntry(id: 60, word: "小编", pinyin: "", weight: 65_535),
+                    StoreEntry(id: 61, word: "给大家", pinyin: "", weight: 60_000),
+                    StoreEntry(id: 62, word: "凌晨", pinyin: "", weight: 20_000),
+                ],
+                "天": [
+                    StoreEntry(id: 63, word: "的话", pinyin: "", weight: 65_535),
+                ],
+            ]
+        )
+        let engine = Engine(store: predictingStore)
+        engine.commitLearning(word: "今天", pinyin: ["jin", "tian"])
+        let words = engine.suggestions(limit: 5).map(\.word)
+        #expect(words.first == "天气")
+        #expect(!words.contains("小编"))
+        #expect(!words.contains("给大家"))
+        #expect(!words.contains("的话"))
+    }
+
+    @Test func suggestionsPreferUserBigram() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "MyIME-suggest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let userStore = try #require(UserStore(path: directory.appending(path: "user.sqlite").path))
+        let predictingStore = PredictingStore(
+            entries: [StoreEntry(id: 50, word: "今天", pinyin: "jin'tian", weight: 65_535)],
+            predictions: [
+                "今天": [StoreEntry(id: 70, word: "凌晨", pinyin: "", weight: 50_000)],
+            ]
+        )
+        let engine = Engine(store: predictingStore, userStore: userStore)
+        engine.commitLearning(word: "今天", pinyin: ["jin", "tian"])
+        userStore.learn(word: "开会", pinyin: "kai'hui", previous: "今天")
+        userStore.waitForPendingWrites()
+        let words = engine.suggestions(limit: 5).map(\.word)
+        #expect(words.contains("开会"))
+        #expect(words.first == "开会" || words.first == "天气")
     }
 
     @Test func invalidInputNeverCrashes() {

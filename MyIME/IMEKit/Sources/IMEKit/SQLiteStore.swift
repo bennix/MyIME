@@ -440,6 +440,38 @@ public final class UserStore: @unchecked Sendable {
             .map { min(4, log1p(Double($0))) } ?? 0
     }
 
+    public func predictNext(after previous: String, limit: Int) -> [StoreEntry] {
+        guard !previous.isEmpty, limit > 0 else { return [] }
+        return lock.withLock {
+            guard let database else { return [] }
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            let sql = """
+            SELECT word,count FROM bigram
+            WHERE prev=?1 AND length(word) >= 2
+            ORDER BY count DESC, word ASC
+            LIMIT ?2
+            """
+            guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+            bind(previous, to: statement, index: 1)
+            sqlite3_bind_int(statement, 2, Int32(limit))
+            var entries: [StoreEntry] = []
+            var rowID: Int64 = -1
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let word = sqlite3_column_text(statement, 0) {
+                rowID -= 1
+                let count = Int(sqlite3_column_int(statement, 1))
+                entries.append(StoreEntry(
+                    id: rowID,
+                    word: String(cString: word),
+                    pinyin: "",
+                    weight: min(65_535, 8_000 + count * 4_000)
+                ))
+            }
+            return entries
+        }
+    }
+
     public func importTSV(from url: URL, validSyllables: Set<String> = PinyinTable.syllables) -> (imported: Int, rejected: Int) {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return (0, 1) }
         var accepted: [(String, String, Int)] = []
