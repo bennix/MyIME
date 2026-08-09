@@ -5,6 +5,15 @@ public struct SegmentationPath: Equatable, Sendable {
     public let consumedLength: Int
     public let fuzzyMatches: Int
     public let partialCount: Int
+    public let typoCount: Int
+
+    public init(syllables: [String], consumedLength: Int, fuzzyMatches: Int, partialCount: Int, typoCount: Int = 0) {
+        self.syllables = syllables
+        self.consumedLength = consumedLength
+        self.fuzzyMatches = fuzzyMatches
+        self.partialCount = partialCount
+        self.typoCount = typoCount
+    }
 
     public var preedit: String { syllables.joined(separator: "'") }
 }
@@ -12,6 +21,9 @@ public struct SegmentationPath: Equatable, Sendable {
 public struct Segmenter: Sendable {
     private let syllables: Set<String>
     private let initials = Set("bpmfdtnlgkhjqxzcsryw".map(String.init))
+    /// Formal full finals users occasionally type; normalized penalty-free because
+    /// the raw spelling is never a valid syllable on its own.
+    private static let fullFormFinals = [("uen", "un"), ("uei", "ui"), ("iou", "iu")]
 
     public init(syllables: Set<String> = PinyinTable.syllables) {
         self.syllables = syllables
@@ -32,7 +44,8 @@ public struct Segmenter: Sendable {
                         syllables: prefix.syllables + path.syllables,
                         consumedLength: prefix.consumedLength + path.consumedLength,
                         fuzzyMatches: prefix.fuzzyMatches + path.fuzzyMatches,
-                        partialCount: prefix.partialCount + path.partialCount
+                        partialCount: prefix.partialCount + path.partialCount,
+                        typoCount: prefix.typoCount + path.typoCount
                     )
                 }
             }
@@ -47,10 +60,16 @@ public struct Segmenter: Sendable {
         let chars = Array(text)
         var results: [SegmentationPath] = []
 
-        func walk(_ index: Int, _ path: [String], _ fuzzyCount: Int, _ partialCount: Int) {
+        func walk(_ index: Int, _ path: [String], _ fuzzyCount: Int, _ partialCount: Int, _ typoCount: Int) {
             if results.count >= limit * 8 { return }
             if index == chars.count {
-                results.append(SegmentationPath(syllables: path, consumedLength: index, fuzzyMatches: fuzzyCount, partialCount: partialCount))
+                results.append(SegmentationPath(
+                    syllables: path,
+                    consumedLength: index,
+                    fuzzyMatches: fuzzyCount,
+                    partialCount: partialCount,
+                    typoCount: typoCount
+                ))
                 return
             }
             var found = false
@@ -60,26 +79,61 @@ public struct Segmenter: Sendable {
                     let token = String(chars[index..<end])
                     if syllables.contains(token) {
                         found = true
-                        walk(end, path + [token], fuzzyCount, partialCount)
+                        walk(end, path + [token], fuzzyCount, partialCount, typoCount)
+                    } else if let normalized = normalizedFullForm(of: token) {
+                        found = true
+                        walk(end, path + [normalized], fuzzyCount, partialCount, typoCount)
+                    } else if typoCount == 0, end - index >= 3 {
+                        // Correct a single adjacent-letter transposition (hoa→hao, zhogn→zhong).
+                        for corrected in transposedVariants(of: token) {
+                            found = true
+                            walk(end, path + [corrected], fuzzyCount, partialCount, typoCount + 1)
+                        }
                     }
                     for equivalent in fuzzyEquivalents(of: token, rules: fuzzy) where syllables.contains(equivalent) {
                         found = true
-                        walk(end, path + [equivalent], fuzzyCount + 1, partialCount)
+                        walk(end, path + [equivalent], fuzzyCount + 1, partialCount, typoCount)
                     }
                 }
             }
             let initial = String(chars[index])
             if initials.contains(initial) {
                 found = true
-                walk(index + 1, path + [initial], fuzzyCount, partialCount + 1)
+                walk(index + 1, path + [initial], fuzzyCount, partialCount + 1, typoCount)
             }
             if !found, !path.isEmpty {
-                results.append(SegmentationPath(syllables: path, consumedLength: index, fuzzyMatches: fuzzyCount, partialCount: partialCount + 1))
+                results.append(SegmentationPath(
+                    syllables: path,
+                    consumedLength: index,
+                    fuzzyMatches: fuzzyCount,
+                    partialCount: partialCount + 1,
+                    typoCount: typoCount
+                ))
             }
         }
 
-        walk(0, [], 0, 0)
+        walk(0, [], 0, 0, 0)
         return Array(results.sorted(by: Self.precedes).prefix(limit))
+    }
+
+    private func normalizedFullForm(of token: String) -> String? {
+        for (fullForm, short) in Self.fullFormFinals where token.hasSuffix(fullForm) {
+            let normalized = String(token.dropLast(fullForm.count)) + short
+            if syllables.contains(normalized) { return normalized }
+        }
+        return nil
+    }
+
+    private func transposedVariants(of token: String) -> [String] {
+        var variants: [String] = []
+        var chars = Array(token)
+        for index in 0..<(chars.count - 1) where chars[index] != chars[index + 1] {
+            chars.swapAt(index, index + 1)
+            let variant = String(chars)
+            if syllables.contains(variant), !variants.contains(variant) { variants.append(variant) }
+            chars.swapAt(index, index + 1)
+        }
+        return variants
     }
 
     private func fuzzyEquivalents(of token: String, rules: FuzzyRules) -> Set<String> {
@@ -104,7 +158,11 @@ public struct Segmenter: Sendable {
     }
 
     private static func precedes(_ lhs: SegmentationPath, _ rhs: SegmentationPath) -> Bool {
+        // Consuming more of the input always wins: a truncated parse must never
+        // shadow a complete one (e.g. [wo,xian,za]+junk vs [wo,xian,zai,hen,m]).
+        if lhs.consumedLength != rhs.consumedLength { return lhs.consumedLength > rhs.consumedLength }
         if lhs.partialCount != rhs.partialCount { return lhs.partialCount < rhs.partialCount }
+        if lhs.typoCount != rhs.typoCount { return lhs.typoCount < rhs.typoCount }
         if lhs.fuzzyMatches != rhs.fuzzyMatches { return lhs.fuzzyMatches < rhs.fuzzyMatches }
         if lhs.syllables.count != rhs.syllables.count { return lhs.syllables.count < rhs.syllables.count }
         return lhs.preedit < rhs.preedit

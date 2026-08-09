@@ -22,6 +22,19 @@ from typing import Iterable, TextIO
 CHINESE_RUN = re.compile(r"[\u3400-\u9fff]+")
 TEXT_FIELDS = ("title", "text", "content", "desc", "answer", "chinese")
 
+# Content-farm / self-media boilerplate markers. Texts containing any of these
+# are skipped entirely so junk transitions like 今天→小编 never enter the model.
+NOISE_MARKERS = (
+    "小编", "点赞", "关注我们", "微信号", "公众号", "订阅号", "转发", "扫码",
+    "扫一扫", "阅读原文", "点击上方", "点击下方", "点击蓝字", "长按识别",
+    "头条号", "百家号", "免责声明", "版权归原作者", "抽奖", "领取福利",
+    "优惠券", "加微信", "私信我", "求关注", "客服热线",
+)
+
+
+def is_noisy(text: str) -> bool:
+    return any(marker in text for marker in NOISE_MARKERS)
+
 
 def dictionary_rows(path: Path) -> Iterable[tuple[str, int]]:
     with path.open(encoding="utf-8") as source:
@@ -202,11 +215,25 @@ def write_conditional_bigrams(
     bigrams: Counter[tuple[str, str]],
     unigrams: Counter[str],
     limit: int,
+    min_count: int = 3,
+    min_lift: float = 1.2,
 ) -> None:
     if not bigrams:
         path.write_text("", encoding="utf-8")
         return
-    selected = bigrams.most_common(limit)
+    total = max(1, sum(unigrams.values()))
+    filtered = []
+    for (prev, word), count in bigrams.items():
+        if count < min_count:
+            continue
+        previous_count = max(1, unigrams[prev])
+        # Lift = P(word|prev) / P(word); keep only genuinely associated pairs.
+        conditional = count / previous_count
+        marginal = max(1, unigrams[word]) / total
+        if conditional < min_lift * marginal:
+            continue
+        filtered.append(((prev, word), count))
+    selected = heapq.nlargest(limit, filtered, key=lambda item: item[1])
     alpha = 0.1
     with path.open("w", encoding="utf-8", newline="\n") as destination:
         for (prev, word), count in sorted(selected, key=lambda item: (item[0][0], item[0][1])):
@@ -216,9 +243,17 @@ def write_conditional_bigrams(
             destination.write(f"{prev}\t{word}\t{score:.8f}\n")
 
 
+def parse_corpus_spec(spec: str) -> tuple[Path, int]:
+    """Parse an optional 'weight:path' corpus spec (defaults to weight 1)."""
+    prefix, separator, remainder = spec.partition(":")
+    if separator and prefix.isdigit():
+        return Path(remainder), max(1, int(prefix))
+    return Path(spec), 1
+
+
 def build(
     dictionary: Path,
-    corpora: list[Path],
+    corpora: list[tuple[Path, int]],
     char_output: Path,
     unigram_output: Path,
     bigram_output: Path,
@@ -235,14 +270,18 @@ def build(
         add_char_trigrams(char_counts, word, weight)
 
     seen = 0
+    skipped = 0
     working_char = max(char_limit * 2, char_limit + 50_000)
     working_unigram = max(unigram_limit * 2, unigram_limit + 50_000)
     working_bigram = max(bigram_limit * 2, bigram_limit + 100_000)
 
-    for corpus in corpora:
+    for corpus, corpus_weight in corpora:
         for text in corpus_texts(corpus):
-            add_char_trigrams(char_counts, text)
-            add_word_counts(unigrams, bigrams, text, vocab, max_len)
+            if is_noisy(text):
+                skipped += 1
+                continue
+            add_char_trigrams(char_counts, text, corpus_weight)
+            add_word_counts(unigrams, bigrams, text, vocab, max_len, corpus_weight)
             seen += 1
             if seen % 100_000 == 0:
                 if len(char_counts) > working_char:
@@ -258,7 +297,7 @@ def build(
         char_counts = prune_counter(char_counts, working_char)
         unigrams = prune_counter(unigrams, working_unigram)
         bigrams = prune_counter(bigrams, working_bigram)
-        print(f"processed {corpus} ({seen} text fields)", flush=True)
+        print(f"processed {corpus} x{corpus_weight} ({seen} kept, {skipped} noisy skipped)", flush=True)
 
     char_output.parent.mkdir(parents=True, exist_ok=True)
     top_chars = char_counts.most_common(char_limit)
@@ -267,9 +306,10 @@ def build(
     top_unigrams = unigrams.most_common(unigram_limit)
     write_normalized(unigram_output, [(word, count) for word, count in top_unigrams])
     write_conditional_bigrams(bigram_output, bigrams, unigrams, bigram_limit)
+    written_bigrams = sum(1 for _ in bigram_output.open(encoding="utf-8"))
     print(
         f"wrote {len(top_chars)} char trigrams, {len(top_unigrams)} unigrams, "
-        f"{min(bigram_limit, len(bigrams))} bigrams",
+        f"{written_bigrams} bigrams",
         flush=True,
     )
 
@@ -280,14 +320,15 @@ if __name__ == "__main__":
     parser.add_argument("char_output", type=Path)
     parser.add_argument("--unigram-output", type=Path, required=True)
     parser.add_argument("--bigram-output", type=Path, required=True)
-    parser.add_argument("--corpus", type=Path, nargs="*", default=[])
+    parser.add_argument("--corpus", type=str, nargs="*", default=[],
+                        help="corpus path, optionally prefixed 'weight:' e.g. 2:/path/to/corpus")
     parser.add_argument("--char-limit", type=int, default=300_000)
-    parser.add_argument("--unigram-limit", type=int, default=180_000)
-    parser.add_argument("--bigram-limit", type=int, default=600_000)
+    parser.add_argument("--unigram-limit", type=int, default=250_000)
+    parser.add_argument("--bigram-limit", type=int, default=900_000)
     arguments = parser.parse_args()
     build(
         arguments.dictionary,
-        arguments.corpus,
+        [parse_corpus_spec(spec) for spec in arguments.corpus],
         arguments.char_output,
         arguments.unigram_output,
         arguments.bigram_output,

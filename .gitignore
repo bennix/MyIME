@@ -7,3 +7,5 @@ MyIME/IMEKit/.build/
 xcuserdata/
 *.xcuserstate
 dist/
+MyIME/.zcode/
+release/*.dmg

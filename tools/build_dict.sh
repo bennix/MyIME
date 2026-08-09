@@ -119,7 +119,8 @@ CORPUS_DIR="$ROOT_DIR/build/sources/brightmart"
   --bigram-output "$BUILD_DIR/word_bigram.tsv" \
   --corpus "$CORPUS_DIR/wiki2019zh.download" \
     "$CORPUS_DIR/news2016zh.sample.part" \
-    "$CORPUS_DIR/baike2018qa.sample.part"
+    "2:$CORPUS_DIR/baike2018qa.sample.part" \
+    "2:$CORPUS_DIR/webtext2019zh.sample.part"
 "$PYTHON_BIN" "$SCRIPT_DIR/compile.py" \
   "$MERGED" \
   "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite" \

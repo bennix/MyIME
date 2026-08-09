@@ -117,6 +117,10 @@ def recalibrate_weights(
     for word, pinyin, py_key, initials, weight, mask in rows:
         corpus = scores.get(word)
         if corpus is None:
+            # High-weight multi-character words the corpus never produced are
+            # dictionary noise; damp them so they stop crowding SQL pre-selection.
+            if len(word) >= 2 and weight > 20_000:
+                weight = 20_000 + int((weight - 20_000) * 0.55)
             recalibrated.append((word, pinyin, py_key, initials, weight, mask))
             continue
         # Blend dictionary weight with corpus unigram evidence.
