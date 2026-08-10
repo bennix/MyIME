@@ -1,4 +1,4 @@
-MyIME 1.0.9 安装说明
+MyIME 1.0.10 安装说明
 
 1. 打开 DMG，双击 MyIME.app。
 2. MyIME 会安装到当前用户的“~/Library/Input Methods”并自动注册。全新安装不需要管理员密码；
