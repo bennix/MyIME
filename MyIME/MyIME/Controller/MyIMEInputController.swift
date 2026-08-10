@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import InputMethodKit
 import IMEKit
 import os
@@ -16,7 +17,6 @@ final class MyIMEInputController: IMKInputController {
     private var page = 0
     private var highlighted = 0
     private var expandedCandidates = false
-    private var englishMode = false
     private var shiftWasDown = false
     private var shiftUsedWithKey = false
     private var composedPhrase = ""
@@ -38,16 +38,22 @@ final class MyIMEInputController: IMKInputController {
         logger.notice("输入会话已建立")
     }
 
+    private func textClient(from sender: Any?) -> (any IMKTextInput)? {
+        if let sender = sender as? any IMKTextInput {
+            return sender
+        }
+        return client()
+    }
+
     override func recognizedEvents(_ sender: Any!) -> Int {
         Int(NSEvent.EventTypeMask.keyDown.rawValue | NSEvent.EventTypeMask.flagsChanged.rawValue)
     }
 
     override func activateServer(_ sender: Any!) {
         super.activateServer(sender)
-        englishMode = false
         shiftWasDown = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
         shiftUsedWithKey = false
-        if let client = sender as? IMKTextInput {
+        if let client = textClient(from: sender) {
             activeClient = client
             Self.activatedController = self
             client.overrideKeyboard(withKeyboardNamed: "com.apple.keylayout.ABC")
@@ -60,10 +66,152 @@ final class MyIMEInputController: IMKInputController {
     }
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
-        guard let event, let client = sender as? IMKTextInput else { return false }
+        guard let event, let client = textClient(from: sender) else {
+            logger.error("无法从输入事件取得文本客户端")
+            return false
+        }
         activeClient = client
         logger.debug("收到输入事件：type=\(event.type.rawValue), keyCode=\(event.keyCode)")
         return safelyHandle(event, client: client)
+    }
+
+    /// Some WebKit/Electron text clients fall back to the key-binding delivery path instead
+    /// of forwarding NSEvent objects. Supporting this callback keeps those clients usable.
+    override func inputText(_ string: String!, client sender: Any!) -> Bool {
+        guard let string, !string.isEmpty, let client = textClient(from: sender) else { return false }
+        activeClient = client
+
+        for character in string {
+            if character.isASCII, character.isLetter {
+                if raw.isEmpty {
+                    composedPhrase = ""
+                    composedPinyin = []
+                }
+                raw.append(String(character).lowercased())
+                refresh(client)
+                continue
+            }
+            if character == "'", !raw.isEmpty {
+                raw.append(character)
+                refresh(client)
+                continue
+            }
+            if character == " " {
+                if !raw.isEmpty {
+                    commitHighlighted(client)
+                } else if showingSuggestions, !output.candidates.isEmpty {
+                    commitSuggestion(highlighted, client: client)
+                } else {
+                    client.insertText(" ", replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+                }
+                continue
+            }
+            if let number = character.wholeNumberValue, (!raw.isEmpty || showingSuggestions) {
+                let maximumNumber = expandedCandidates ? 6 : 9
+                if (1...maximumNumber).contains(number) {
+                    let activeRowStart = expandedCandidates ? highlighted / 6 * 6 : 0
+                    if showingSuggestions, raw.isEmpty {
+                        commitSuggestion(activeRowStart + number - 1, client: client)
+                    } else {
+                        selectVisible(activeRowStart + number - 1, client: client)
+                    }
+                    continue
+                }
+            }
+            if !raw.isEmpty {
+                commitHighlighted(client)
+                let text = character.isASCII
+                    ? localizedPunctuation(for: character)
+                    : String(character)
+                client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+                engine.breakPhraseLearningContext()
+                clearSuggestions()
+            } else {
+                client.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+            }
+        }
+        logger.debug("已通过 inputText 回退路径处理输入")
+        return true
+    }
+
+    /// Some custom text controls (including Electron/WebKit-based clients) request the
+    /// IMKServerInput "text data only" delivery mode. In that mode InputMethodKit does not
+    /// call handle(_:client:) or inputText(_:client:); it supplies Unicode, hardware key code,
+    /// and modifiers through this four-argument callback instead.
+    override func inputText(
+        _ string: String!,
+        key keyCode: Int,
+        modifiers flags: Int,
+        client sender: Any!
+    ) -> Bool {
+        guard let string,
+              let client = textClient(from: sender),
+              (0...Int(UInt16.max)).contains(keyCode) else { return false }
+        activeClient = client
+
+        let modifiers = NSEvent.ModifierFlags(rawValue: UInt(flags))
+        if let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: string,
+            charactersIgnoringModifiers: string.lowercased(),
+            isARepeat: false,
+            keyCode: UInt16(keyCode)
+        ) {
+            logger.debug("已通过文本数据回退路径处理输入：keyCode=\(keyCode)")
+            return safelyHandle(event, client: client)
+        }
+        return inputText(string, client: sender)
+    }
+
+    override func didCommand(by aSelector: Selector!, client sender: Any!) -> Bool {
+        guard let aSelector, let client = textClient(from: sender) else { return false }
+        activeClient = client
+        switch NSStringFromSelector(aSelector) {
+        case "deleteBackward:":
+            guard !raw.isEmpty else {
+                if showingSuggestions {
+                    clearSuggestions()
+                    return true
+                }
+                return false
+            }
+            raw.removeLast()
+            refresh(client)
+            return true
+        case "cancelOperation:":
+            guard !raw.isEmpty || showingSuggestions else { return false }
+            reset(client)
+            return true
+        case "insertNewline:", "insertLineBreak:":
+            guard !raw.isEmpty || showingSuggestions else { return false }
+            if showingSuggestions, raw.isEmpty {
+                commitSuggestion(highlighted, client: client)
+            } else if hasNavigatedCandidates {
+                commitHighlighted(client)
+            } else {
+                commit(composedPhrase + raw, pinyin: [], client: client, learn: false)
+            }
+            return true
+        case "moveLeft:":
+            return moveHighlight(-1)
+        case "moveRight:":
+            return moveHighlight(1)
+        case "moveDown:":
+            return moveDown()
+        case "moveUp:":
+            return moveUp()
+        case "pageUp:":
+            return movePage(-1)
+        case "pageDown:":
+            return movePage(1)
+        default:
+            return false
+        }
     }
 
     override func deactivateServer(_ sender: Any!) {
@@ -78,7 +226,7 @@ final class MyIMEInputController: IMKInputController {
             }
             activeClient = nil
         }
-        guard let client = sender as? IMKTextInput else {
+        guard let client = textClient(from: sender) else {
             super.deactivateServer(sender)
             return
         }
@@ -106,7 +254,7 @@ final class MyIMEInputController: IMKInputController {
     }
 
     override func commitComposition(_ sender: Any!) {
-        guard let client = sender as? IMKTextInput else { return }
+        guard let client = textClient(from: sender) else { return }
         if !raw.isEmpty || !composedPhrase.isEmpty {
             commit(composedPhrase + raw, pinyin: [], client: client, learn: false)
         }
@@ -121,7 +269,6 @@ final class MyIMEInputController: IMKInputController {
             if shiftWasDown, !shiftIsDown {
                 if !shiftUsedWithKey {
                     if !raw.isEmpty { commit(composedPhrase + raw, pinyin: [], client: client, learn: false) }
-                    englishMode.toggle()
                 }
                 shiftUsedWithKey = false
             }
@@ -202,8 +349,6 @@ final class MyIMEInputController: IMKInputController {
             return false
         }
         guard let characters = event.charactersIgnoringModifiers, let character = characters.first else { return false }
-        if englishMode { return false }
-
         if character.isASCII, character.isLetter {
             if raw.isEmpty {
                 composedPhrase = ""
@@ -253,14 +398,54 @@ final class MyIMEInputController: IMKInputController {
         highlighted = 0
         expandedCandidates = false
         hasNavigatedCandidates = false
-        let marked = localized(composedPhrase, prefs: prefs) + (output.preedit.isEmpty ? raw : output.preedit)
-        client.setMarkedText(marked, selectionRange: NSRange(location: marked.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        let converted = localized(composedPhrase, prefs: prefs)
+        let rawPreedit = output.preedit.isEmpty ? raw : output.preedit
+        // Notes / Markdown / Electron clients often ignore plain String marked text.
+        // Send an attributed buffer with IMK mark styles, matching Squirrel/落格.
+        setMarkedText(converted: converted, rawPreedit: rawPreedit, client: client)
         candidateWindow.update(
             candidates: localizedCandidates(visibleCandidates, prefs: prefs),
             highlighted: highlighted,
             prefs: prefs,
             expanded: expandedCandidates,
             client: client
+        )
+    }
+
+    /// Builds the inline composition buffer the way InputMethodKit expects.
+    /// Plain `String` works in many AppKit clients, but Notes and several
+    /// WebKit/Electron editors only honor attributed marked text with TSM hilite styles.
+    private func setMarkedText(converted: String, rawPreedit: String, client: IMKTextInput) {
+        let marked = converted + rawPreedit
+        let attributed = NSMutableAttributedString(string: marked)
+        let convertedLength = (converted as NSString).length
+        let totalLength = attributed.length
+
+        if convertedLength > 0 {
+            let range = NSRange(location: 0, length: convertedLength)
+            if let attrs = mark(forStyle: kTSMHiliteConvertedText, at: range) as? [NSAttributedString.Key: Any] {
+                attributed.setAttributes(attrs, range: range)
+            }
+        }
+        if convertedLength < totalLength {
+            let range = NSRange(location: convertedLength, length: totalLength - convertedLength)
+            if let attrs = mark(forStyle: kTSMHiliteSelectedRawText, at: range) as? [NSAttributedString.Key: Any] {
+                attributed.setAttributes(attrs, range: range)
+            }
+        }
+
+        client.setMarkedText(
+            attributed,
+            selectionRange: NSRange(location: totalLength, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
+        )
+    }
+
+    private func clearMarkedText(client: IMKTextInput) {
+        client.setMarkedText(
+            NSAttributedString(string: ""),
+            selectionRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: NSNotFound)
         )
     }
 
@@ -304,7 +489,7 @@ final class MyIMEInputController: IMKInputController {
     private func commit(_ text: String, pinyin: [String], client: IMKTextInput, learn: Bool, suggest: Bool = false) {
         let committedText = localized(text, prefs: PreferencesStore.load())
         client.insertText(committedText, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
-        client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        clearMarkedText(client: client)
         if learn { engine.commitLearning(word: text, pinyin: pinyin) }
         if pinyin.isEmpty { engine.breakPhraseLearningContext() }
         raw = ""
@@ -370,7 +555,7 @@ final class MyIMEInputController: IMKInputController {
         composedPhrase = ""
         composedPinyin = []
         hasNavigatedCandidates = false
-        client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        clearMarkedText(client: client)
         clearSuggestions()
     }
 

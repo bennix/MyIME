@@ -1,12 +1,19 @@
-MyIME 1.0.6 安装说明
+MyIME 1.0.9 安装说明
 
-1. 双击 MyIME.app。
-2. 按照系统提示输入管理员密码，MyIME 会自动安装和注册。
-3. 在「系统设置 → 键盘 → 输入法」中，从「简体中文」添加 MyIME（若列表中已有可直接切换）。
-4. 在 macOS 菜单栏的输入法菜单中选择“MyIME”。
+1. 打开 DMG，双击 MyIME.app。
+2. MyIME 会安装到当前用户的“~/Library/Input Methods”并自动注册。全新安装不需要管理员密码；
+   从 1.0.8 或更早版本升级时，需要输入一次管理员密码以移除旧的系统级副本。
+3. 首次启用时，macOS 会显示“Allow MyIME to enable MyIME?”；请点“Allow”。这是系统强制的输入法安全授权，应用不能代替你点击。
+4. 安装成功后会显示结果窗口。请从 macOS 菜单栏的系统输入法菜单选择 MyIME，或按 Control–空格切换。
 
-当前版本使用 Apple Development 证书签名，尚未完成 Apple 公证。
-如果 macOS 阻止首次打开，请按住 Control 点击 MyIME.app，然后选择“打开”。
+如果系统输入法菜单没有显示 MyIME，可点击常驻的 MyIME 菜单栏图标查看切换说明，
+或先完全退出再重新打开“系统设置”。如果“简体中文”列表仍未刷新，请注销并重新登录当前用户一次。
+
+MyIME 不安装登录守护进程。选择 MyIME 时，macOS 会自动运行输入服务；如果手动结束该进程，
+请从系统输入法菜单先切换到 ABC，再切回 MyIME，让 Notes 等应用重新建立输入会话。
+
+请只安装没有 development 或 local-adhoc 后缀的正式分发包。正式分发版使用 Developer ID 签名并完成
+Apple 公证；带上述后缀的临时构建仅用于开发机调试，不应发送给其他用户安装。
 
 项目主页：https://bennix.github.io/MyIME/
 源代码：https://github.com/bennix/MyIME
