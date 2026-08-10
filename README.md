@@ -14,6 +14,22 @@
 
 [产品介绍](https://bennix.github.io/MyIME/) · [下载最新版](https://github.com/bennix/MyIME/releases/latest)
 
+## 教材与课程实验
+
+- [《从零实现 macOS 中文输入法》PDF 教材](output/pdf/MyIME-Textbook.pdf)：197 页，分初级篇、高级算法篇、系统工程篇和课程实验篇，结合 MyIME 1.0.10 源码讲解。
+- [LaTeX 与 MetaPost 源文件](docs/textbook/)：可运行 `docs/textbook/build.sh` 重新生成教材。
+- `lab1-starter` 至 `lab12-starter`：十二个固定实验起始分支；每个分支包含独立可测试的 `TeachingStarter` Swift 包和当前实验契约，不包含实验答案。
+
+学生可从指定实验分支开始：
+
+```sh
+git fetch origin --prune
+git switch --create homework/lab1 origin/lab1-starter
+swift test --package-path TeachingStarter
+```
+
+公开仓库的 starter 分支用于避免误读完整实现；正式评分课程建议把指定分支导入独立的 GitHub Classroom 私有模板，避免提前看到 `main` 中的参考实现。
+
 ## 特点
 
 - 智能整句：支持连续拼音生成自然短句候选；内置离线准确率基准持续回归。
