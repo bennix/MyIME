@@ -20,7 +20,9 @@
 - 本地词库：整合 Rime-Ice、THUOCL、中文维基、新华/语义等词表，以及过滤噪声后的字/词级语言模型。
 - 容错输入：支持常见相邻字母颠倒、全拼韵母写法归一，以及简拼/尾部简拼。
 - 联想续写：上屏后基于本地统计与常用续写给出建议，并抑制网页语料噪声。
-- 安装自愈：版本更新后自动重绑前台输入会话；登录后自动恢复输入源注册。
+- 安装自愈：安装和版本更新时自动刷新输入源注册，不额外安装登录守护进程。
+- 系统托管：由 macOS 在选中 MyIME 时启动唯一的中文输入服务；若手动结束该进程，需切换一次 ABC → MyIME 重新建立输入会话。
+- 中文状态明确：选择 MyIME 时始终处理中文输入；需要英文时切换到 ABC，不再使用不可见的 Shift 会话开关。
 - 越用越顺手：重复选择会提升词频；3 秒内分开选择的字词会自动组成新词。
 - 候选操作：方向键移动、回车和数字选词、展开候选与翻页。
 - 英文辅助：回车可直接送出原始英文，并提供基础拼写建议。
@@ -29,10 +31,10 @@
 ## 安装
 
 1. 从 [Releases](https://github.com/bennix/MyIME/releases/latest) 下载 DMG。
-2. 打开 DMG，双击 `MyIME.app`；首次安装会请求管理员授权。
+2. 打开 DMG，双击 `MyIME.app`；全新安装无需管理员授权，从 1.0.8 或更早版本升级时会请求一次授权以清理旧副本。
 3. 从 macOS 菜单栏的输入法菜单切换到 **MyIME**。
 
-当前构建使用 Apple Development 证书签名，尚未完成 Apple 公证。如果 macOS 阻止首次打开，请在 Finder 中按住 Control 点击 `MyIME.app`，选择“打开”。
+公开下载包必须使用 Developer ID Application 证书签名并完成 Apple 公证。文件名带 `development` 或 `local-adhoc` 的构建仅供开发机测试，请勿发送给其他用户安装。
 
 ## 开发与测试
 
@@ -42,7 +44,23 @@ swift test --package-path IMEKit
 xcodebuild build -project MyIME.xcodeproj -scheme MyIME -configuration Release -destination 'platform=macOS'
 ```
 
-应用基于 InputMethodKit，采用非沙盒方式运行。启动后会自动安装到 `/Library/Input Methods/MyIME.app`、注册输入源并从系统目录重新启动。
+应用基于 InputMethodKit，采用非沙盒方式运行。启动后会自动安装到 `~/Library/Input Methods/MyIME.app`、注册输入源并从用户目录重新启动。1.0.8 或更早版本升级时会要求一次管理员密码，用于移除旧的 `/Library/Input Methods/MyIME.app`，避免同一 Bundle ID 的两个副本导致输入源缓存冲突。
+
+## 生成可安装 APP 与 DMG
+
+正式分发需要钥匙串中存在 `Developer ID Application` 证书及其私钥，并预先配置 `notarytool` 钥匙串凭据：
+
+```sh
+MYIME_NOTARY_PROFILE=MyIMENotary ./tools/build-release.sh
+```
+
+脚本会依次运行引擎测试、验证内置词库、构建并校验 Universal 2（Apple Silicon + Intel）APP、签名、生成 DMG、提交 Apple 公证、装订公证票据并生成 SHA-256 校验文件，产物位于 `dist/`。脚本会拒绝把 Apple Development 签名误当作公开分发包。
+
+仅供当前 Mac 调试时可生成明确标记的 ad-hoc 版本；该版本不能代替正式签名分发版：
+
+```sh
+MYIME_ALLOW_ADHOC=1 ./tools/build-release.sh
+```
 
 ## 词库与许可
 
