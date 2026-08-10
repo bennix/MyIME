@@ -284,7 +284,7 @@ enum SelfInstaller {
 
         if fileManager.fileExists(atPath: staging.path) { try fileManager.removeItem(at: staging) }
         if fileManager.fileExists(atPath: backup.path) { try fileManager.removeItem(at: backup) }
-        try fileManager.copyItem(at: source, to: staging)
+        try copyWithoutQuarantine(from: source, to: staging)
 
         if fileManager.fileExists(atPath: destination.path) {
             try fileManager.moveItem(at: destination, to: backup)
@@ -298,6 +298,43 @@ enum SelfInstaller {
                 try? fileManager.moveItem(at: backup, to: destination)
             }
             throw error
+        }
+    }
+
+    /// A notarized app opened from a downloaded DMG is quarantined and may run from an
+    /// AppTranslocation path. FileManager.copyItem preserves that quarantine attribute. The
+    /// installed copy would then be translocated again, fail the installed-path check, and
+    /// repeatedly reinstall and terminate instead of keeping its IMK server alive.
+    /// Preserve the complete signed bundle with `ditto`, then remove only quarantine metadata
+    /// from the copy that the already-approved installer places in the user's Input Methods.
+    /// (`ditto --noqtn` still preserves a directory-level quarantine attribute on some recent
+    /// macOS releases, so the explicit xattr step is required and covered by a regression test.)
+    static func copyWithoutQuarantine(from source: URL, to destination: URL) throws {
+        let copy = Process()
+        copy.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        copy.arguments = [source.path, destination.path]
+        try copy.run()
+        copy.waitUntilExit()
+        guard copy.terminationReason == .exit, copy.terminationStatus == 0 else {
+            throw NSError(
+                domain: "MyIMESelfInstaller",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "无法复制 MyIME 到当前用户的输入法目录。"]
+            )
+        }
+
+        let clearQuarantine = Process()
+        clearQuarantine.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        clearQuarantine.arguments = ["-dr", "com.apple.quarantine", destination.path]
+        try clearQuarantine.run()
+        clearQuarantine.waitUntilExit()
+        guard clearQuarantine.terminationReason == .exit,
+              clearQuarantine.terminationStatus == 0 else {
+            throw NSError(
+                domain: "MyIMESelfInstaller",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "复制 MyIME 时无法移除下载隔离属性。"]
+            )
         }
     }
 
