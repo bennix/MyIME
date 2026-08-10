@@ -171,7 +171,7 @@ R[j]\leftarrow \operatorname{TopK}\{p\oplus x[i:j]\mid p\in R[i]\}.
 未见 bigram 不能直接令整条路径概率为零。可以使用加性平滑、退避或插值：
 
 \[
-P(w_i\mid w_{i-1})=\lambda P_{bi}(w_i\mid w_{i-1})+(1-\lambda)P_{uni}(w_i).
+P(w_i\mid w_{i-1})=\lambda P_{\mathrm{bi}}(w_i\mid w_{i-1})+(1-\lambda)P_{\mathrm{uni}}(w_i).
 \]
 
 MyIME 当前使用奖励式统计而非严格归一概率，教学者应明确这是工程评分函数。二者都可用，但不能把“分数”错误称为经过校准的概率。
@@ -205,6 +205,25 @@ word<TAB>pinyin_with_apostrophe<TAB>weight<TAB>source_mask
 \begin{lab}[小型词库构建]
 选择两个许可明确的小词表，转换 CIF、去重、构建 SQLite，并输出每阶段统计。第二名同学在另一台机器运行同一脚本，比较数据库内容哈希或规范化导出哈希。
 \end{lab}
+
+\section{五分钟编译：从 CIF 到 SQLite}
+
+若已经准备好四列 CIF，学生不必先运行完整的网络下载与语言模型流水线。仓库现有的 \sourcefile{tools/compile.py} 可以直接把 CIF 编译为教学用 SQLite；下面的命令与脚本真实参数一致，可作为实验六和实验十一的最小起点：
+
+\begin{lstlisting}[language=bash,caption={从 CIF 编译并检查教学词库}]
+set -eu
+
+cif=build/cif/student.tsv
+out=build/student/system.sqlite
+
+mkdir -p "$(dirname "$out")"
+SOURCE_DATE_EPOCH=0 python3 tools/compile.py "$cif" "$out"
+sqlite3 "$out" \
+  'PRAGMA integrity_check; SELECT count(*) AS entries FROM entries;'
+shasum -a 256 "$out"
+\end{lstlisting}
+
+\code{SOURCE_DATE_EPOCH=0} 固定数据库元数据时间，使同一 CIF 更容易做可复现性比较。若要构建发布版的完整词库、语言模型和简繁映射，则从仓库根目录设置 \code{PYTHON_BIN=/usr/bin/python3}，再执行 \code{tools/build_dict.sh}。该入口会下载锁定版本的来源并依次完成合并、模型构建、编译和严格验证，耗时与磁盘占用都明显高于上述课堂最小命令。
 
 
 \chapter{故障排查手册}

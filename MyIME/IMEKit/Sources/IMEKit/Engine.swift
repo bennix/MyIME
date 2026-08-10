@@ -323,7 +323,7 @@ public final class Engine: IMEEngine, @unchecked Sendable {
         guard let previous, !previous.isEmpty else { return [] }
 
         // Prefer the exact committed phrase. Single-character suffix anchors pull in web junk
-        // (今天 → 天 → 的/了) and drown useful continuations.
+        // and drown useful continuations, so only keep a two-character suffix as fallback.
         var anchors = [previous]
         if previous.count > 2 { anchors.append(String(previous.suffix(2))) }
 

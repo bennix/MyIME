@@ -27,7 +27,7 @@ MyIME 的 \code{SegmentationPath} 还记录消费长度、模糊匹配数、简�
 可以把路径代价写成：
 
 \[
-C(P)=a(n-\ell_P)+bN_{partial}+cN_{typo}+dN_{fuzzy},
+C(P)=a(n-\ell_P)+bN_{\mathrm{partial}}+cN_{\mathrm{typo}}+dN_{\mathrm{fuzzy}},
 \]
 
 其中 \(\ell_P\) 是消费长度，第一项应具有最高优先级，或者在比较器中直接先比较消费长度。
@@ -180,7 +180,7 @@ MyIME 把归一化频率映射到伪对数尺度，每增加一个词产生插�
 \begin{align*}
 S(c)=&\;\alpha F(c)+\beta U(c)+\gamma C(c,h)\\
 &-\lambda_fN_f-\lambda_tN_t-\lambda_pN_p\\
-&-\lambda_iR_{incomplete}-\lambda_cR_{completion}.
+&-\lambda_iR_{\mathrm{inc}}-\lambda_cR_{\mathrm{comp}}.
 \end{align*}
 
 其中 \(F\) 是系统频率，\(U\) 是用户偏好，\(C\) 是上下文；后两行分别惩罚模糊、错拼、简拼、未消费输入和超前补全。
@@ -205,8 +205,8 @@ S(c)=&\;\alpha F(c)+\beta U(c)+\gamma C(c,h)\\
 \(\lambda_i\) & 未完整消费输入的惩罚 & 5.0（内部尺度） & \code{Scale.incompletePenalty} \\
 \(\lambda_c\) & 超前补全一个音节的成本 & 0.8/音节 & \code{Scale.completionPenalty} \\
 \(N_f,N_t,N_p\) & 对应边或匹配发生次数 & 非负整数 & 切分路径上的计数 \\
-\(R_{incomplete}\) & 未消费输入量 & 字符或音节数 & 完整度检查 \\
-\(R_{completion}\) & 候选超出当前输入的音节量 & 非负整数 & 前缀补全长度差 \\
+\(R_{\mathrm{inc}}\) & 未消费输入量 & 字符或音节数 & 完整度检查 \\
+\(R_{\mathrm{comp}}\) & 候选超出当前输入的音节量 & 非负整数 & 前缀补全长度差 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -283,7 +283,7 @@ S(c)=&\;\alpha F(c)+\beta U(c)+\gamma C(c,h)\\
 从假设末词 \(u\) 转移到词 \(v\) 时，可写成
 
 \[
-S_{new}=S_{old}+F(v)-\lambda_{word}+B(u,v)+T(u,v)+U(v),
+S_{\mathrm{new}}=S_{\mathrm{old}}+F(v)-\lambda_{\mathrm{word}}+B(u,v)+T(u,v)+U(v),
 \]
 
 其中 \(B\) 是系统 bigram，\(T\) 是字符序列证据，\(U\) 是用户偏好。若尾部只有简拼，查询可以允许前缀补全，但必须扣除额外音节成本。

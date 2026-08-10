@@ -324,10 +324,10 @@ IMKInputController 很难在普通单元测试中实例化，因为它依赖系�
 用户输入到一半时也需要候选。若 \code{entryKey.hasPrefix(raw)}，可以把词条作为补全候选，但必须施加补全惩罚；否则只输入 \code{b} 就可能让长专名淹没单字。一个基础评分可以写成：
 
 \[
-S(w)=\alpha\cdot \frac{f(w)}{65535}-\lambda\cdot\Delta_{\mathrm{completion}},
+S(w)=\alpha\cdot \frac{f(w)}{65535}-\lambda\cdot\Delta_{\mathrm{comp}},
 \]
 
-其中 \(f(w)\) 是词库权重，\(\Delta_{\mathrm{completion}}\) 是候选比用户输入多出的音节数。
+其中 \(f(w)\) 是词库权重，\(\Delta_{\mathrm{comp}}\) 是候选比用户输入多出的音节数。下标 \(\mathrm{comp}\) 是 completion 的缩写；本书对具有语义的多字母下标统一使用直立 Roman 字体，避免与多个变量的乘积混淆。
 
 \section{接口而非文件格式}
 
