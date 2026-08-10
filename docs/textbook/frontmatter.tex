@@ -1,0 +1,128 @@
+\begin{titlepage}
+  \centering
+  \vspace*{2.5cm}
+  {\fontsize{30}{38}\selectfont\bfseries\color{MyDark} 从零实现 macOS 中文输入法\par}
+  \vspace{0.8cm}
+  {\Large 基于 MyIME 的 InputMethodKit 教程\par}
+  \vspace{1.6cm}
+  {\large 初级篇：从键盘事件到中文上屏\par}
+  \vspace{0.35cm}
+  {\large 高级篇：切分、词格、语言模型与工程发布\par}
+  \vfill
+  \figmp[.92\linewidth]{13}{课程路线：从 Echo IME 到可发布输入法}
+  \vfill
+  {\large MyIME 教学项目\par}
+  \vspace{0.3cm}
+  {\small 适用于 macOS 13 及以上版本 · Swift 5.9+ · Xcode 15+\par}
+  \vspace{1cm}
+\end{titlepage}
+
+\thispagestyle{empty}
+\noindent\textbf{书名：}从零实现 macOS 中文输入法：基于 MyIME 的 InputMethodKit 教程
+
+\noindent\textbf{教材定位：}面向高年级本科生、研究生、Swift/macOS 开发者，以及希望理解中文输入法内部机制的工程人员。
+
+\noindent\textbf{配套项目：}\url{https://github.com/bennix/MyIME}
+
+\noindent\textbf{版本说明：}本教材以 MyIME 1.0.10（构建 76）的源码结构为基线。输入法属于与操作系统深度耦合的软件，后续 macOS 与 Xcode 版本可能改变注册、签名或事件投递行为。课堂实验应以实际运行结果为准。
+
+\vfill
+\begin{warningbox}[许可与引用]
+教材引用的 MyIME 源码遵循仓库许可证；词库来源具有各自许可证。教学者分发源码、词库或改编版本前，应阅读仓库中的 \sourcefile{GPL-3.0.txt}、\sourcefile{ThirdPartyNotices.txt} 与 \sourcefile{tools/LICENSES.md}。本教材不把公开词表自动等同于“无条件可再分发”。
+\end{warningbox}
+\clearpage
+
+\chapter*{前言：输入法是一门小型系统课程}
+\addcontentsline{toc}{chapter}{前言：输入法是一门小型系统课程}
+
+输入法看似只是“把拼音变成汉字”，实际上同时涉及操作系统服务、事件状态机、自然语言处理、本地数据库、图搜索、用户界面、性能工程、安全、签名与发布。它很小，小到一学期可以完成；又足够真实，真实到每一次按键都可能暴露架构问题。
+
+本书不从庞大的商业输入法倒推黑盒行为，而从一个可以阅读、编译、测试和发布的开源项目 MyIME 出发。学生将沿着一条可验证的路径前进：先让一个字母被输入法拦截，再建立组合区与候选列表，继而实现拼音切分、词库查询、整句组合和本地学习，最后处理跨应用兼容、安装注册、Developer ID 签名和 Apple 公证。
+
+全书分为四个部分。初级篇回答“输入法怎样活起来”；高级篇回答“候选怎样产生并排序”；工程篇回答“为什么开发机能用、换一台机器却失效”；课程实验与综合项目则把知识转化为可评分、可演示、可复现的成果。
+
+\begin{concept}[学习方法]
+不要把本书当作 API 字典。每章都围绕一个可观察现象：按下按键、出现下划线、弹出候选、选择词语、退出进程、换机安装。先预测现象，再运行实验，最后阅读源码解释结果。输入法调试最忌讳“代码看起来应该可以”。
+\end{concept}
+
+\chapter*{读者对象与先修知识}
+\addcontentsline{toc}{chapter}{读者对象与先修知识}
+
+初级篇只要求读者掌握 Swift 的变量、函数、结构体、类、协议和可选值，能够在 Xcode 中打开项目并阅读编译错误。了解 AppKit 有帮助，但不是前提。高级篇默认读者学过数据结构、离散数学和概率统计的基础内容，至少知道图、动态规划、对数和数据库索引的概念。
+
+完成全书后，读者应能做到：
+
+\begin{enumerate}
+  \item 解释 macOS 输入源、输入法进程、\term{IMKServer} 与客户端之间的关系；
+  \item 实现包含 \term{raw buffer}、\term{preedit}、候选列表与 \term{commit} 的输入状态机；
+  \item 将拼音串建模为切分图，将短句生成建模为词格搜索；
+  \item 设计可解释的候选评分函数，并区分词频、上下文与惩罚项；
+  \item 使用 SQLite 保存系统词库和用户学习数据；
+  \item 在 Notes、浏览器和 Electron 应用中定位输入法兼容问题；
+  \item 构建 Universal 2 应用，完成签名、公证、装订与 DMG 发布；
+  \item 为准确率、延迟、确定性和跨应用行为建立测试证据。
+\end{enumerate}
+
+\chapter*{课程组织建议}
+\addcontentsline{toc}{chapter}{课程组织建议}
+
+本书适合 16 周课程，每周 3 学时讲授加 2 学时实验。也可以压缩为 8 周项目课。推荐安排如下。
+
+\begin{longtable}{p{1.2cm}p{4cm}p{6.3cm}}
+\toprule
+周次 & 主题 & 可验收成果 \\
+\midrule
+1--2 & 输入法系统模型、最小 IMK 服务 & 能注册输入源，拦截并回送字母 \\
+3--4 & 组合状态与候选窗口 & 能输入 raw buffer、退格、取消和上屏 \\
+5--6 & 拼音切分与词库查询 & 小词库完成全拼、简拼和硬边界 \\
+7--8 & 候选排序与整句生成 & 完成可解释评分和词格搜索 \\
+9--10 & SQLite 与用户学习 & 重启后保留词频和上下文偏好 \\
+11--12 & UI、性能和可访问性 & 候选窗跟随光标，P95 延迟达标 \\
+13--14 & 安装、兼容与安全 & 在第二台 Mac 的 Notes 和浏览器验收 \\
+15--16 & 发布与答辩 & 公证 DMG、测试报告和设计说明 \\
+\bottomrule
+\end{longtable}
+
+\begin{concept}[两条代码路线]
+课堂前半程使用“教学版”思路：内存词库、最少状态、明确日志。课堂后半程阅读仓库中的完整实现。不要在第一周就让学生修改 699 行的输入控制器；先让他们能独立画出状态机，再去理解真实工程为何复杂。
+\end{concept}
+
+\chapter*{符号、术语与源码约定}
+\addcontentsline{toc}{chapter}{符号、术语与源码约定}
+
+本书使用以下约定：
+
+\begin{itemize}
+  \item \code{raw} 表示用户尚未转换的原始字母串，如 \code{jintian}；
+  \item \code{preedit} 表示显示在插入点附近、尚未最终提交的组合文本；
+  \item \code{candidate} 表示候选；\code{commitText} 表示最终上屏文本；
+  \item 拼音路径写作 \(P=(s_1,s_2,\ldots,s_m)\)；候选词写作 \(w\)；
+  \item \(S(w\mid P,h)\) 表示在拼音路径 \(P\) 与历史上下文 \(h\) 下候选的评分；
+  \item 源码路径均相对于仓库根目录；代码行号以 1.0.10 为基线；
+  \item \key{Space}、\key{Return}、\key{Esc} 表示键盘按键。
+\end{itemize}
+
+\figmp{1}{从物理按键到最终上屏的端到端数据流}
+
+\chapter*{开发环境与第一次构建}
+\addcontentsline{toc}{chapter}{开发环境与第一次构建}
+
+建议使用一台非关键工作机或独立 macOS 用户账户完成实验。输入法安装在用户目录并由系统加载，开发过程中的重复注册、崩溃和旧副本残留会影响整个登录会话。开始前请确认 Xcode 命令行工具和 Swift 可用：
+
+\begin{lstlisting}[language=bash,numbers=none]
+xcodebuild -version
+swift --version
+swift test --package-path MyIME/IMEKit
+\end{lstlisting}
+
+第一条测试命令只构建纯逻辑包，不安装输入法，因此非常适合验证环境。随后用 Xcode 打开 \sourcefile{MyIME/MyIME.xcodeproj}，选择 MyIME Scheme 构建 Release。课堂中每名学生都应维护一份“环境记录”：macOS 版本、芯片架构、Xcode 版本、输入源 ID、安装位置和最后一次成功测试时间。
+
+\begin{warningbox}[不要用“能编译”代替“能输入”]
+输入法至少包含四层成功条件：编译成功、安装成功、系统注册成功、目标应用中的组合输入成功。它们互不等价。尤其在换机分发时，签名、公证、App Translocation 和输入源缓存都可能让前两层成功而第四层失败。
+\end{warningbox}
+
+\begin{lab}[基线记录]
+运行纯引擎测试，记录测试总数与耗时；检查系统设置中的当前输入源；在 Notes 中分别用 ABC 和系统简体拼音输入一行文字。此实验不是为了验证 MyIME，而是建立后续对照组。
+\end{lab}
+
+\clearpage

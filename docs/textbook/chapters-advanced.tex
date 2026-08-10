@@ -1,0 +1,470 @@
+\chapter{拼音切分：把字符串变成图}
+
+\begin{goals}
+能够把无分隔拼音建模为有向无环图；实现全拼、撇号硬边界和多路径切分；理解消费长度、路径排序与截断策略。
+\end{goals}
+
+词库需要音节边界，用户却通常输入连续字母。\code{xian} 既可能是 \code{xian}（先），也可能是 \code{xi'an}（西安）；\code{fang'an} 中撇号明确禁止跨界。切分器的任务不是立即决定汉字，而是产生若干可能的音节路径。
+
+令归一化字符串为 \(x=x_0x_1\cdots x_{n-1}\)。建立顶点集合 \(V=\{0,1,\ldots,n\}\)。如果子串 \(x[i:j]\) 是合法拼音音节，就添加边 \((i,j)\)。从 0 到 \(n\) 的每一条路径对应一种完整切分。
+
+\figmp{4}{\code{xian} 的若干切分路径；顶点表示字母位置，边表示合法音节}
+
+\section{路径不仅包含音节}
+
+MyIME 的 \code{SegmentationPath} 还记录消费长度、模糊匹配数、简拼数量和错拼数量。这样排序器无需重新分析路径来源，就能对非精确路径施加惩罚。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=30,caption={拼音路径的数据结构}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
+
+\section{搜索与限制}
+
+完整枚举可能指数增长。教学版可以用深度优先搜索理解所有路径，工程版必须限制：单音节最大长度、每个输入返回路径数、搜索中间结果数和总耗时。MyIME 对每个片段递归尝试最长到最短的 token，并在结果过多时提前停止。
+
+\lstinputlisting[language=Swift,firstline=31,lastline=116,caption={切分主流程与受限递归搜索}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
+
+如果某条路径只消费了前缀，它可以用于“用户还在输入”的候选，但绝不能压过完整消费路径。因此路径排序首先比较 \code{consumedLength}，再比较简拼、错拼、模糊音和音节数。
+
+可以把路径代价写成：
+
+\[
+C(P)=a(n-\ell_P)+bN_{partial}+cN_{typo}+dN_{fuzzy},
+\]
+
+其中 \(\ell_P\) 是消费长度，第一项应具有最高优先级，或者在比较器中直接先比较消费长度。
+
+\begin{lab}[枚举歧义]
+对 \code{xian}、\code{fangan}、\code{chang'an} 和 \code{jintian} 输出全部切分路径。分别启用和禁用撇号硬边界，说明哪些边被删除。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 用邻接表写出 \code{xian} 的切分图。
+  \item 为什么“总是取最长音节”不能正确处理所有中文拼音？
+  \item 给出一个输入，使路径数量迅速增加，并提出两个剪枝办法。
+  \item 将递归搜索改写为动态规划，比较两种实现的可读性。
+\end{enumerate}
+
+\begin{summarybox}
+拼音切分是路径生成，不是最终选词。用 DAG 表示合法音节，用路径元数据保存容错来源，再以消费完整性和代价控制候选空间。
+\end{summarybox}
+
+
+\chapter{简拼、混拼、模糊音与错拼容忍}
+
+\begin{goals}
+区分缩写与模糊匹配；理解容错召回和排序惩罚必须同时设计；能为相邻字母颠倒、正式韵母写法和模糊音建立测试。
+\end{goals}
+
+容错不是“把更多东西都当成正确”。它包含两个阶段：\term{召回}阶段生成更多可能路径，\term{排序}阶段让精确路径在通常情况下领先。只有召回没有惩罚，候选会被噪声淹没；只有惩罚没有召回，用户错误输入时根本看不到正确词。
+
+\section{简拼与混拼}
+
+如果单个声母字母被允许作为占位音节，\code{bj} 可表示 \code{b'j}，匹配“北京”；\code{beij} 可以切为 \code{bei'j}，形成尾部简拼。路径记录 \code{partialCount}，评分时按数量扣分。
+
+纯简拼查询通常需要专门的首字母索引。MyIME 只在路径中的每个音节都是单字母时生成 initials 查询键，防止完整拼音 \code{xiexie} 被错误拿去匹配首字母 \code{xx} 的“学习”等词。
+
+\lstinputlisting[language=Swift,firstline=36,lastline=75,caption={完整拼音与纯简拼查询的区分}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+
+\section{模糊音是可配置关系}
+
+模糊音可以表示为一组双向替换关系，例如 \(z\leftrightarrow zh\)、\(n\leftrightarrow l\)、\(an\leftrightarrow ang\)。不同用户需要的规则不同，因此默认全部关闭，并把命中次数写入路径。
+
+\lstinputlisting[language=Swift,firstline=137,lastline=171,caption={模糊音等价集合的生成}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
+
+\section{相邻字母颠倒}
+
+用户可能把 \code{hao} 输入为 \code{hoa}，把 \code{zhong} 输入为 \code{zhogn}。MyIME 枚举 token 中相邻字符的一次交换，只接受交换后成为合法音节的结果，并限制整条路径最多使用一次错拼修正。若无限允许交换，搜索空间和误召回都会失控。
+
+\lstinputlisting[language=Swift,firstline=118,lastline=136,caption={一次相邻字符颠倒修正}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
+
+设精确候选基础分为 \(S_0\)，一种简单容错分数为
+
+\[
+S=S_0-\lambda_fN_f-\lambda_pN_p-\lambda_tN_t,
+\]
+
+其中 \(N_f,N_p,N_t\) 分别是模糊音、简拼和错拼次数。通常应令 \(\lambda_t>\lambda_f>\lambda_p\)，但最终顺序要由验证集决定。
+
+\begin{lab}[容错边界]
+为 \code{bj}、\code{beij}、\code{ci/chi}、\code{hoa/hao}、\code{zhogn/zhong} 建立表格，记录关闭与开启规则后的 top-3。检查精确输入的首选是否被容错候选改变。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么模糊音不适合直接修改用户 raw？
+  \item 设计一种允许两次错拼、但不导致组合爆炸的策略。
+  \item 简拼路径应该比不完整全拼路径优先吗？给出产品场景后作答。
+\end{enumerate}
+
+\begin{summarybox}
+容错是一项“召回＋惩罚”的成对设计。每条非精确路径都应携带来源和次数，使排序可解释、测试可回归。
+\end{summarybox}
+
+
+\chapter{SQLite 词库：模式、索引与只读运行时}
+
+\begin{goals}
+理解系统词库与用户词库分离的原因；能根据查询模式设计 SQLite 索引；掌握完整性检查、只读打开和故障降级。
+\end{goals}
+
+百万级词库不适合每次启动全部载入内存。SQLite 提供紧凑存储、索引查询、事务和跨架构一致性。MyIME 把系统词库打包在应用资源中，以只读方式使用；用户学习写入用户目录的独立数据库。更新应用时可以替换系统库，而不覆盖个人数据。
+
+\figmp{7}{只读系统词库、可写用户词库和统计语言模型共同服务引擎}
+
+\section{查询模式决定索引}
+
+典型查询包括：
+
+\begin{itemize}
+  \item 根据无分隔拼音键精确或前缀查词；
+  \item 根据纯简拼 initials 查词；
+  \item 查询词语 unigram 权重；
+  \item 根据前词查询 bigram；
+  \item 根据音节区间查询词格边。
+\end{itemize}
+
+索引应围绕这些访问路径，而不是“所有列都建索引”。前缀查询只有在模式与排序规则允许使用 B-tree 时才会命中索引；课堂实验应使用 \code{EXPLAIN QUERY PLAN} 验证，而不是凭直觉。
+
+\lstinputlisting[language=Swift,firstline=41,lastline=128,caption={SQLiteStore 的打开、语句准备与查询入口}]{../../MyIME/IMEKit/Sources/IMEKit/SQLiteStore.swift}
+
+\section{只读与完整性}
+
+系统库来自签名应用包，运行时不应修改。只读打开能减少锁和误写风险。启动时完整性检查失败，MyIME 会降级为空系统词库但保留英文直通，而不是让输入法进程持续崩溃。对输入法而言，“中文候选暂时不可用但键盘仍可输入”通常优于“所有按键失效”。
+
+\section{用户库写入}
+
+用户选择候选后更新词频、最近使用时间和上下文关系。写入不能阻塞每次按键的主路径。可以使用串行队列异步写入，同时提供测试用的 \code{waitForPendingWrites()} 以建立确定的断言。
+
+\lstinputlisting[language=Swift,firstline=294,lastline=388,caption={UserStore 的本地持久化结构}]{../../MyIME/IMEKit/Sources/IMEKit/SQLiteStore.swift}
+
+\begin{warningbox}[数据库失败必须静默降级]
+用户库损坏、目录只读或磁盘空间不足时，学习可以停止，但基本输入不能停止。系统词库损坏时也要避免在每次按键重复执行昂贵的失败操作。
+\end{warningbox}
+
+\begin{lab}[查询计划]
+复制一个小型 system.sqlite，分别在有无 pinyin key 索引时执行 1000 次查询。记录平均值与 P95，并使用 \code{EXPLAIN QUERY PLAN} 保存查询计划截图。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么系统词库和用户词库不应放在同一个可写文件中？
+  \item 前缀查询 \code{LIKE 'bei\%'} 在什么条件下可以使用索引？
+  \item 设计用户库迁移版本号和原子升级流程。
+\end{enumerate}
+
+\begin{summarybox}
+SQLite 在这里不是“方便保存数据”，而是运行时查询结构。只读系统库、独立用户库、针对性索引和失败降级共同保证输入路径稳定。
+\end{summarybox}
+
+
+\chapter{候选评分：从词频到对数域}
+
+\begin{goals}
+能够解释每个评分项；理解为什么多词句子要在对数域累加；掌握频率、用户偏好、上下文、完整度和容错惩罚的组合。
+\end{goals}
+
+候选排序不是给每个词拍脑袋加一个权重。它要比较单个完整词与多个词组成的句子，还要容纳来自不同量纲的词频、用户次数和上下文统计。概率乘积在句子变长时迅速变小，因此通常转入对数域：
+
+\[
+\log P(w_1,\ldots,w_m)=\sum_{i=1}^{m}\log P(w_i\mid w_{i-1},h).
+\]
+
+MyIME 把归一化频率映射到伪对数尺度，每增加一个词产生插入成本，bigram/trigram 证据可以补偿该成本。
+
+\lstinputlisting[language=Swift,firstline=15,lastline=35,caption={引擎共享状态与对数尺度常量}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+
+\section{一个可解释的总分}
+
+可将候选 \(c\) 的总分抽象为：
+
+\begin{align*}
+S(c)=&\;\alpha F(c)+\beta U(c)+\gamma C(c,h)\\
+&-\lambda_fN_f-\lambda_tN_t-\lambda_pN_p\\
+&-\lambda_iR_{incomplete}-\lambda_cR_{completion}.
+\end{align*}
+
+其中 \(F\) 是系统频率，\(U\) 是用户偏好，\(C\) 是上下文；后两行分别惩罚模糊、错拼、简拼、未消费输入和超前补全。
+
+初学者最容易把这些字母误读成“概率”，或把配置项的原始值直接与内部缩放常量比较。表~\ref{tab:score-symbols} 把数学符号、物理意义和 MyIME 1.0.10 的典型量级放在一起。典型值只是当前实现的默认值或内部尺度，不是普适常数；调参时仍须以封存验证集为准。
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption{候选评分符号与源码映射}
+\label{tab:score-symbols}
+\begin{tabular}{p{1.8cm}p{4.0cm}p{2.3cm}p{4.0cm}}
+\toprule
+符号 & 物理含义 & 典型取值 & 源码对应 \\
+\midrule
+\(\alpha\) & 系统词频奖励的权重 & 1.0 & \code{frequencyWeight} \\
+\(\beta\) & 本地用户选择偏好的权重 & 0.35 & \code{userWeight}；再乘归一化用户尺度 \\
+\(\gamma\) & bigram/trigram 上下文奖励的权重 & 0.20 & \code{contextWeight} \\
+\(\lambda_f\) & 每次模糊音匹配的惩罚 & 0.08（配置） & \code{fuzzyPenalty}，内部按 \code{Scale} 缩放 \\
+\(\lambda_t\) & 每次容错拼写边的惩罚 & 4.5（内部尺度） & \code{Scale.typoPenalty} \\
+\(\lambda_p\) & 简拼或部分匹配的惩罚 & 0.10（配置） & \code{partialPenalty}，内部按 \code{Scale} 缩放 \\
+\(\lambda_i\) & 未完整消费输入的惩罚 & 5.0（内部尺度） & \code{Scale.incompletePenalty} \\
+\(\lambda_c\) & 超前补全一个音节的成本 & 0.8/音节 & \code{Scale.completionPenalty} \\
+\(N_f,N_t,N_p\) & 对应边或匹配发生次数 & 非负整数 & 切分路径上的计数 \\
+\(R_{incomplete}\) & 未消费输入量 & 字符或音节数 & 完整度检查 \\
+\(R_{completion}\) & 候选超出当前输入的音节量 & 非负整数 & 前缀补全长度差 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\figmp{6}{候选总分由奖励项和惩罚项共同组成}
+
+\lstinputlisting[language=Swift,firstline=75,lastline=130,caption={单词候选的召回、加权、去重与稳定排序}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+
+\section{长度偏差}
+
+直接累加词频会偏爱由很多高频单字组成的句子，或者反过来偏爱一个低质量长词。词插入成本是控制分词粒度的一种方法。另一些系统使用长度归一化、语言模型概率或学习排序。教学实现应先保证评分可解释，再追求更复杂模型。
+
+\section{稳定排序}
+
+当分数相等时，MyIME 继续比较是否完整消费、词文本和 ID。稳定 tie-breaker 对测试和肌肉记忆都重要。若候选在相同条件下随机交换，用户每次按数字键的结果都可能不同。
+
+\begin{lab}[权重消融]
+选择 20 条多义输入，依次把 userWeight、contextWeight、fuzzyPenalty 设为零。记录首选变化，并为每条变化写出分数分解。禁止只报告“感觉更准”。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么不能把原始词频直接与用户选择次数相加？
+  \item 证明概率乘积取对数后可转化为和，且不改变候选次序。
+  \item 设计一项避免超长候选在短输入中过早出现的惩罚。
+\end{enumerate}
+
+\begin{summarybox}
+候选评分应在统一尺度上组合奖励与惩罚，并为每项保留解释。对数域让句子评分可加，稳定排序让结果可测试、可学习。
+\end{summarybox}
+
+
+\chapter{词格与 Beam Search：生成整句候选}
+
+\begin{goals}
+能够把音节序列转换成词格；理解 Viterbi/Beam Search 的状态、转移和剪枝；分析完整词、组合句与尾部简拼之间的竞争。
+\end{goals}
+
+词库中未必存在“我是中国人”这个完整词条，但可能分别存在“我”“是”“中国”“人”。若音节路径包含 \(m\) 个音节，就在边界 \(0\ldots m\) 上建立词格：词条覆盖音节区间 \([i,j)\) 时添加一条边。任何从 0 到 \(m\) 的路径都是一种句子组合。
+
+\figmp{5}{词格中的完整词边与多词组合路径}
+
+完整枚举仍可能指数增长。Viterbi 在满足马尔可夫状态假设时保存每个位置的最优路径；为了输出多个候选并保留不同末词上下文，MyIME 使用宽度受限的 Beam Search。每扩展一层，只保留得分最高的若干假设。
+
+\section{宽度为 2 的动态推演}
+
+下图展示一次故意缩小的搜索。分数越大越好，Beam Width \(B=2\)。开始只有空假设；第一步产生 A、B、C，只保留 A 与 B；第二步只能从幸存者继续展开，因此被剪掉的 C 即使后来存在一条非常好的后继边，也永远无法回来。
+
+\figmp{16}{Beam Width 为 2 时，假设的展开、排序与剪枝}
+
+\begin{center}
+\small
+\begin{tabular}{p{1.4cm}p{5.8cm}p{4.9cm}}
+\toprule
+时刻 & 展开后的假设（累计分数） & 排序与保留 \\
+\midrule
+0 & \(\epsilon:0\) & 保留起点 \\
+1 & A:\(-1.2\)，B:\(-1.7\)，C:\(-2.9\) & 保留 A、B；剪掉 C \\
+2 & AD:\(-2.0\)，AE:\(-2.4\)，BF:\(-2.2\)，BG:\(-3.1\) & 保留 AD、BF；剪掉 AE、BG \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+这张图还揭示一个重要边界：Beam Search 只承诺“当前层前 \(B\) 名”，不承诺全局最优。若 C 的下一条边奖励极高，完整枚举的最佳路径可能以 C 开头，但宽度 2 已经把它永久删除。调试时应记录“每层入选阈值、被剪假设及其分数”，这样准确率回退才能定位到具体剪枝层。
+
+\section{假设状态}
+
+一个假设至少包含已生成文本、累计分数、词数和最后一个词。最后一个词用于计算下一条边的 bigram 转移。比较器依次看得分、词数和文本，保持确定性。
+
+\lstinputlisting[language=Swift,firstline=180,lastline=230,caption={词格假设与句子组合入口}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+
+\section{转移分数}
+
+从假设末词 \(u\) 转移到词 \(v\) 时，可写成
+
+\[
+S_{new}=S_{old}+F(v)-\lambda_{word}+B(u,v)+T(u,v)+U(v),
+\]
+
+其中 \(B\) 是系统 bigram，\(T\) 是字符序列证据，\(U\) 是用户偏好。若尾部只有简拼，查询可以允许前缀补全，但必须扣除额外音节成本。
+
+\lstinputlisting[language=Swift,firstline=230,lastline=321,caption={词格扩展、Beam 剪枝与句子候选生成}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+
+\section{时间预算}
+
+输入法每个按键都会重新求候选，不能让某个歧义长串无限搜索。MyIME 为普通词查找和词格组合设置独立 deadline，使冷启动查询不会完全挤占整句预算。时间预算是一种工程剪枝：结果可能不是数学上全局最优，但必须在交互期限内返回。
+
+\begin{concept}[正确性与实时性的交换]
+桌面输入法的目标不是离线求出所有句子，而是在几十毫秒内给出足够好的前几项。Beam 宽度、候选边上限和 deadline 都属于产品质量参数，应通过准确率—延迟曲线选择。
+\end{concept}
+
+\begin{lab}[Beam 宽度实验]
+把 Beam 宽度分别设为 2、4、8、12、24，在固定 30 句验证集上测 top-1 与 P95 延迟。画出横轴为宽度、纵轴为准确率和延迟的双曲线，解释拐点。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 画出 \code{wo'shi'zhong'guo'ren} 的一个词格。
+  \item 为什么仅按“当前位置”合并假设可能丢失正确上下文？
+  \item Beam Search 在什么情况下会剪掉最终最优路径？
+  \item 为长于 16 音节的输入设计分段策略。
+\end{enumerate}
+
+\begin{summarybox}
+整句生成是词格上的受限搜索。候选质量取决于边召回、转移分数与剪枝；交互系统必须同时给准确率和延迟设预算。
+\end{summarybox}
+
+
+\chapter{上下文与本地用户学习}
+
+\begin{goals}
+理解短期历史、用户词频和 bigram 的不同作用；设计异步、可衰减、可删除的本地学习；避免把偶然选择永久固化。
+\end{goals}
+
+静态词库无法知道某位用户经常输入“课程设计”还是“产品设计”。本地学习通过重复选择提高候选权重，通过相邻上屏词建立上下文关系，还可以把短时间内分开选择的字词组合成新词。
+
+\figmp{8}{输入、排序、选择和学习形成的本地反馈闭环}
+
+\section{三种学习信号}
+
+\begin{description}
+  \item[用户 unigram] 同一词与读音被选择的次数和最近时间；
+  \item[用户 bigram] 在前词 \(u\) 后选择 \(v\) 的次数；
+  \item[近期组词] 两次相近选择在短时间窗口内组合为新短语。
+\end{description}
+
+用户权重不宜线性无限增长。常用形式是 \(\log(1+c)\) 或带上限的归一化，并加入时间衰减：
+
+\[
+U(w)=\log(1+c_w)\exp\left(-\frac{t-t_w}{\tau}\right).
+\]
+
+这里 \(c_w\) 是选择次数，\(t_w\) 是最近使用时间，\(\tau\) 控制遗忘速度。
+
+\lstinputlisting[language=Swift,firstline=321,lastline=430,caption={续写候选、选择结果和提交学习}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+
+\section{近期组词的边界}
+
+如果用户在 3 秒内先选择“课程”再选择“设计”，可以学习“课程设计”；时间距离过大则不组合。时间窗口只是启发式，还需要限制总长度、字符类型和低质量网页短语。MyIME 的测试分别验证近距离选择会组词、远距离选择不会组词。
+
+\lstinputlisting[language=Swift,firstline=205,lastline=259,caption={用户词、上下文和近期组词的行为测试}]{../../MyIME/IMEKit/Tests/IMEKitTests/IMEKitTests.swift}
+
+\section{隐私与控制权}
+
+本地学习的优势不仅是离线，还包括可解释和可删除。用户应能导出、清空或禁用学习。调试日志不能记录完整敏感输入；课堂项目可以在 Debug 构建中记录哈希、长度和候选 ID，在 Release 中关闭原文日志。
+
+\begin{warningbox}[不要学习所有东西]
+密码框、安全输入、一次性验证码、包含异常控制字符的文本和用户取消的组合都不应进入学习库。输入法必须尊重客户端的安全输入状态。
+\end{warningbox}
+
+\begin{lab}[个性化收敛]
+构造两个同音候选 A、B，使 A 初始领先。连续选择 B 1、3、5、10 次，记录其排名和得分；重启引擎后复测。再等待或模拟时间衰减，观察偏好是否下降。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么最近一次选择不应无条件永久置顶？
+  \item 如何在完全离线前提下跨机器迁移用户词库？
+  \item 设计“撤销一次错误学习”的数据结构。
+\end{enumerate}
+
+\begin{summarybox}
+用户学习是受控反馈系统，不是简单计数。次数、时间、上下文、组词边界、异步写入和用户删除权必须一起设计。
+\end{summarybox}
+
+
+\chapter{Emoji、英文辅助与繁体转换的插件化}
+
+\begin{goals}
+理解附加候选不应破坏中文主排序；能够设计候选后处理管线；区分英文辅助、中文输入源和真正的双语输入法。
+\end{goals}
+
+候选生成完成后，还可以附加 Emoji、英文拼写建议或繁体显示。最安全的做法是把这些功能当作后处理插件：输入基础候选，输出扩展候选，同时保持首选稳定和来源可追踪。
+
+\section{Emoji 紧随语义候选}
+
+如果“医院”命中对应的医院 Emoji，表情符号可以插在该文本候选之后，而不是统一堆在列表尾部或抢到首位。MyIME 使用映射表并保持去重。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=56,caption={Emoji 候选的映射、插入与去重}]{../../MyIME/IMEKit/Sources/IMEKit/EmojiProvider.swift}
+
+插件需要明确优先级。例如基础候选索引为 \(i\)，附加候选应获得小于主候选、但大于远端无关候选的显示位置。相比重新混合所有分数，“紧随来源候选”更容易解释。
+
+\section{英文辅助不是英文模式}
+
+MyIME 在中文组合中识别可能的英文 raw，允许回车原样提交并给出基础建议；持续英文输入仍推荐切换 ABC。这避免输入法内部维护第二套隐形语言状态。商业双语输入法可以选择更复杂策略，但教材应让学生明确三种不同需求：
+
+\begin{enumerate}
+  \item 中文句子里临时输入英文单词；
+  \item 持续输入完整英文段落；
+  \item 拼音串恰好也是英文单词时判断用户意图。
+\end{enumerate}
+
+\lstinputlisting[language=Swift,firstline=628,lastline=680,caption={控制器附加基础英文候选}]{../../MyIME/MyIME/Controller/MyIMEInputController.swift}
+
+\section{后处理次序}
+
+若先繁体转换再 Emoji 映射，映射表可能只认识简体；若先插 Emoji 再去重，要避免把相同符号重复添加。一个清晰管线是：基础引擎候选→英文辅助→繁体显示映射→候选窗；学习时仍保存规范化简体词和原拼音，提交时再输出用户选择的显示形式。
+
+\begin{lab}[插件稳定性]
+为“医院”“咖啡”“good”设计候选快照测试。依次启用 Emoji、繁体和英文辅助，确认中文首选不变、Emoji 紧邻语义词、繁体只改变显示与提交。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 如果用户选择 Emoji，是否应该学习其对应中文词？说明方案。
+  \item 设计一个不会把 \code{shi} 误判为英文的判定规则。
+  \item 后处理插件应否直接修改 Candidate 的 score？比较两种方案。
+\end{enumerate}
+
+\begin{summarybox}
+附加能力应通过可组合后处理扩展核心候选，并保持中文首选、学习语义和显示转换之间的边界。英文辅助不等于完整英文输入模式。
+\end{summarybox}
+
+
+\chapter{准确率、延迟与科学评测}
+
+\begin{goals}
+能设计训练集、开发集和测试集；理解 top-k、KSPC、P50/P95、确定性和冷启动；避免把小型回归集的 100\% 当作商业准确率。
+\end{goals}
+
+输入法“感觉不错”无法指导迭代。评测至少包含候选准确率、击键效率、交互延迟、崩溃与确定性。不同指标可能冲突：扩大 Beam 会提高召回，也可能增加 P95；激进用户学习会提高个人语料准确率，也可能污染新场景。
+
+\section{候选指标}
+
+给定测试集 \(D=\{(x_i,y_i)\}_{i=1}^N\)，top-\(k\) 准确率为
+
+\[
+A_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}\{y_i\in C_k(x_i)\}.
+\]
+
+top-1 衡量空格直接上屏，top-5 衡量用户是否能在首屏找到。\term{KSPC}（每字符击键数）进一步计入翻页、数字选词和纠错动作，更接近真实效率。
+
+\section{延迟指标}
+
+平均延迟会隐藏少数卡顿，应报告 P50、P95、P99 和最大值。分开测冷启动首键、热词查询、长句、简拼和错拼。输入法每次按键都更新候选，因此 100ms 的尾延迟已经明显影响跟手感。
+
+\section{MyIME 内部回归集}
+
+项目提供整句、常用词、多义词、简拼、错拼和尾部简拼测试。这些用例适合防止已知行为退化，但规模较小且由项目开发者维护，不能据此声称与微信或搜狗达到相同准确率。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=141,caption={准确率评测的用例结构与 top-k 断言}]{../../MyIME/IMEKit/Tests/IMEKitTests/AccuracyEvalTests.swift}
+
+\section{避免数据泄漏}
+
+如果看到错误就直接把测试句加入词库，再用同一测试集报告提升，得到的是记忆而非泛化。课程项目至少分为：训练/词库构建数据、调参开发集、最终封存测试集。最终测试集在截止前不公开标签。
+
+\begin{lab}[建立班级基准]
+全班共同设计 500 条匿名句子，按日常、专业、新词、多义、简拼和错拼分层。每组只能在 300 条开发集上调参，教师用 200 条封存集验收。报告 top-1/top-5、KSPC 和 P95。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item top-5 提高而 KSPC 变差，可能是什么原因？
+  \item 为什么应同时测试冷启动和热启动？
+  \item 设计一个衡量候选稳定性的指标。
+  \item 如何在不收集用户击键的情况下构建公开评测集？
+\end{enumerate}
+
+\begin{summarybox}
+评测必须回答“在哪类数据上、用什么指标、在什么环境下”。小型回归集证明已知行为没有退化，不证明真实世界全面领先。
+\end{summarybox}

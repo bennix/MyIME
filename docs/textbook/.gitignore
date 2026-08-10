@@ -1,0 +1,13 @@
+*.aux
+*.fdb_latexmk
+*.fls
+*.idx
+*.ilg
+*.ind
+*.log
+*.mps
+*.out
+*.synctex.gz
+*.toc
+build-output.txt
+main.pdf

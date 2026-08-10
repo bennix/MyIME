@@ -1,0 +1,543 @@
+\chapter{把输入法看成一个系统服务}
+
+\begin{goals}
+能够区分键盘布局、输入源、输入法应用和普通文本应用；能够画出客户端、IMKServer 与控制器的通信关系；理解“进程在运行”和“系统正在把按键交给它”不是同一件事。
+\end{goals}
+
+普通应用拥有窗口，接收键盘事件，再把字符写入自己的文本控件。输入法则站在键盘与普通应用之间：系统把一部分事件交给输入法，输入法维护尚未完成的组合状态，并通过文本输入协议把标记文本或最终文本送回客户端。客户端可能是 Notes，也可能是浏览器的网页输入框、Electron 编辑器或终端。
+
+\term{InputMethodKit}（IMK）提供了这条通信链路。输入法进程创建 \term{IMKServer}，系统根据应用包中的元数据找到服务，再为每个输入会话创建 \term{IMKInputController}。控制器不是一个独立窗口，也不应该假设自己拥有键盘焦点；它是系统在合适时机调用的对象。
+
+\figmp{3}{系统适配层、纯逻辑引擎和可替换存储之间的边界}
+
+\section{四个容易混淆的对象}
+
+\begin{description}
+  \item[输入源] 系统设置里可以选中的语言输入项，具有稳定的输入源标识符；
+  \item[输入法应用] 安装在 \sourcefile{~/Library/Input Methods} 等位置的应用包；
+  \item[输入法进程] 应用被系统启动后形成的运行实例；
+  \item[输入会话] 某个客户端与输入法之间的一段组合输入关系。
+\end{description}
+
+一次常见误诊是：活动监视器里能看到 MyIME，于是断言输入法已经工作。进程存在只说明应用被启动；若系统仍选中 ABC，或者当前客户端没有建立 IMK 会话，按键仍不会进入控制器。反过来，用户强制结束输入法进程后，macOS 通常会在下一次切换输入源时重新启动它。因此输入法不是传统意义上必须常驻的“守护进程”，它更接近由系统托管的服务。
+
+\section{从入口函数阅读真实项目}
+
+MyIME 的入口先处理安装命令，再只在“已安装副本”中创建服务器。这个判断避免从 DMG 或构建目录直接启动的副本冒充系统输入服务。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=29,caption={MyIME 的应用入口与 IMKServer 创建}]{../../MyIME/MyIME/App/IMKBootstrap.swift}
+
+\begin{sourcewalk}[阅读顺序]
+先找 \code{@main}，再找 \code{IMKServer}，最后看 \code{app.run()}。不要一开始就进入候选排序。只要服务器没有正确建立，再优秀的词库和算法也不会收到一个按键。
+\end{sourcewalk}
+
+\section{输入法的成功条件}
+
+我们把一次成功输入拆成五个可单独验证的命题：
+
+\begin{enumerate}
+  \item 应用包位于系统允许的输入法目录；
+  \item 输入源元数据能被系统枚举；
+  \item 用户选择了正确的输入源；
+  \item IMKServer 与控制器被创建，事件进入控制器；
+  \item 控制器向当前客户端正确设置组合文本并提交。
+\end{enumerate}
+
+这种分解是本书的第一条工程原则：\textbf{把“不能输入”改写成一组可证伪的命题。}
+
+\begin{lab}[观察系统状态]
+分别在选中 ABC、系统简体拼音和 MyIME 时观察菜单栏、活动监视器与 Notes。记录哪些状态发生变化。然后结束 MyIME 进程，切换一次 ABC 再切回 MyIME，观察系统是否重启服务。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么不能把菜单栏显示“中”当作控制器一定收到按键的证据？
+  \item 如果 DMG 中的应用能打开设置窗口，但系统列表没有该输入法，应优先检查哪两层？
+  \item 画出从 Notes 到 MyIME，再回到 Notes 的一次完整调用路径。
+\end{enumerate}
+
+\begin{summarybox}
+输入法首先是系统服务，其次才是转换算法。定位故障时应按“安装—注册—选择—事件—上屏”的顺序逐层取证。
+\end{summarybox}
+
+
+\chapter{输入源元数据与最小 IMK 服务}
+
+\begin{goals}
+理解 \sourcefile{Info.plist} 在输入源发现过程中的作用；能够解释连接名、控制器类、语言标识和输入源 ID；能够设计一个只完成字母回送的最小输入法。
+\end{goals}
+
+macOS 不会扫描 Swift 类型来猜测一个应用是不是输入法。系统首先读取应用包中的元数据。MyIME 的 \sourcefile{Info.plist} 同时描述应用身份和输入模式，其中最关键的是服务器连接名、控制器类和 \code{ComponentInputModeDict}。
+
+\lstinputlisting[language=XML,firstline=20,lastline=92,caption={输入法身份与简体中文输入模式声明}]{../../MyIME/MyIME/Resources/Info.plist}
+
+\section{稳定标识符为何重要}
+
+Bundle ID、输入源 ID 与连接名承担不同职责。Bundle ID 标识应用；输入源 ID 标识用户在系统菜单中选择的模式；连接名帮助系统连接服务器。课堂项目中可以使用学校反向域名，例如 \code{edu.example.course.MyIME}，但一旦对外发布就不应随意改变。改变标识符会让系统把升级版视作另一个输入法，用户可能同时看到两个同名条目。
+
+\begin{concept}[语言归类]
+\code{TISIntendedLanguage=zh-Hans} 告诉系统该模式面向简体中文。若语言声明缺失或不一致，第三方输入法可能出现在错误分类中，或者在“添加输入法”对话框里难以找到。教学时应让学生把 UI 现象追溯到元数据，而不是只记住一个 plist 模板。
+\end{concept}
+
+\section{最小服务的责任边界}
+
+一个 Echo IME 只做三件事：建立服务器、创建控制器、把收到的可打印字符原样提交。它不需要 SQLite、候选窗、自学习和安装器。最小模型的意义在于证明系统链路畅通。若 Echo IME 都不能工作，加入词库只会制造更多变量。
+
+概念代码如下：
+
+\begin{lstlisting}[language=Swift,caption={教学用 Echo 控制器骨架}]
+final class EchoController: IMKInputController {
+    override func inputText(_ string: String!, client sender: Any!) -> Bool {
+        guard let client = sender as? IMKTextInput,
+              let string, !string.isEmpty else { return false }
+        client.insertText(string, replacementRange: NSRange(location: NSNotFound, length: 0))
+        return true
+    }
+}
+\end{lstlisting}
+
+这段代码故意不处理组合状态。它帮助学生回答一个关键问题：当前事件投递路径究竟调用 \code{inputText}，还是调用 \code{handle(_:client:)}？不同系统版本、输入服务模式和客户端可能表现不同。真实项目因此同时考虑文本数据投递与事件投递。
+
+\begin{warningbox}[不要硬编码“唯一正确回调”]
+InputMethodKit 的困难之一，是教材示例往往只在作者的系统和文本控件上运行。课堂验收应至少覆盖 Notes 与一个浏览器输入框，并在日志中确认真正被调用的方法。
+\end{warningbox}
+
+\begin{lab}[最小输入链路]
+复制项目并新建教学 target，只保留入口、plist 和 Echo 控制器。安装后在 Notes 输入 \code{abc123}。依次回答：数字是否进入控制器？修饰键是否进入？返回 \code{false} 时客户端发生什么？
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item Bundle ID 与输入源 ID 可以相同吗？即使可以，为什么仍应在概念上区分？
+  \item 如果类名在 plist 中写错，编译器为什么不会报错？运行时会出现什么证据？
+  \item 设计一个实验，证明事件被输入法消费后不会再由客户端重复处理。
+\end{enumerate}
+
+\begin{summarybox}
+元数据决定系统能否发现和连接输入法。最小 Echo IME 是所有后续算法的控制实验，也是排除安装与事件链路问题的最快工具。
+\end{summarybox}
+
+
+\chapter{键盘事件：消费、放行与语义化}
+
+\begin{goals}
+能够区分字符、硬件键码和修饰键；理解返回值对事件传播的影响；把按键映射为“追加、删除、选择、提交、取消、移动”六类输入法动作。
+\end{goals}
+
+输入法不应该把业务逻辑写成一长串神秘键码。更清晰的方法是先把原始 \code{NSEvent} 翻译成语义动作，再由状态机处理动作。例如：字母产生 \code{append(Character)}，退格产生 \code{deleteBackward}，空格产生 \code{select(0)} 或普通空格，取决于是否存在组合状态。
+
+MyIME 的控制器入口展示了真实工程需要面对的判断顺序。
+
+\lstinputlisting[language=Swift,firstline=68,lastline=137,caption={事件入口中的修饰键、字母与特殊键分派}]{../../MyIME/MyIME/Controller/MyIMEInputController.swift}
+
+\section{消费事件的契约}
+
+回调返回 \code{true} 通常表示输入法已经处理事件，客户端不应再次处理；返回 \code{false} 表示放行。错误的返回值会产生两类典型故障：
+
+\begin{itemize}
+  \item 输入法上屏一次、客户端又输入一次，形成重复字符；
+  \item 输入法没有真正处理，却吞掉事件，表现为中英文都无法输入。
+\end{itemize}
+
+所以返回值不是语法细节，而是输入法与客户端之间的所有权声明。
+
+\section{状态决定同一个按键的含义}
+
+\key{Space} 在空闲态应该是普通空格，在组合态通常选择第一候选；\key{Return} 在空闲态交给客户端，在组合态可能提交候选或原始英文；数字在候选态选词，在其他状态则应输入数字。正确行为可以写成决策表。
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+按键 & 空闲态 & 组合态 & 候选导航态 \\
+\midrule
+Space & 放行 & 首选上屏 & 当前候选上屏 \\
+Return & 放行 & 提交候选/原文 & 当前候选上屏 \\
+Esc & 放行 & 取消组合 & 取消组合 \\
+Backspace & 放行 & 删除 raw 尾字符 & 删除 raw 尾字符 \\
+1--9 & 放行 & 数字选词 & 数字选词 \\
+方向键 & 放行 & 进入导航 & 移动高亮 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{concept}[动作层]
+建议课堂实现 \code{enum InputAction}，把事件解析与状态改变分开测试。这样无需启动 IMKServer，也能验证 \key{Shift}、\key{Option}、组合键和数字键的语义。
+\end{concept}
+
+\section{中英文边界}
+
+MyIME 1.0.10 把“选中 MyIME”定义为中文状态，持续英文输入时切换 ABC；在组合状态下按回车可以提交原始英文，并提供基础拼写建议。这一设计舍弃了隐藏的 Shift 中英文会话开关，换取更明确的系统状态。教学中应强调：这是一项产品决策，不是输入法框架的唯一答案。
+
+\begin{lab}[按键矩阵]
+为 6 种动作与 3 种状态建立至少 18 个测试格。人工测试时同时记录“控制器是否返回 true”“客户端最终文本”“raw 是否清空”“候选窗是否关闭”。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么不应只根据 \code{charactersIgnoringModifiers} 判断所有快捷键？
+  \item 在组合态按 \key{Command+C} 时，输入法应该怎样处理？说明理由。
+  \item 设计 Caps Lock 切换策略，并指出它与系统输入源切换可能发生的冲突。
+\end{enumerate}
+
+\begin{summarybox}
+键盘事件必须先语义化，再交给状态机。返回值决定事件所有权；同一按键的意义取决于当前是否存在组合与候选导航状态。
+\end{summarybox}
+
+
+\chapter{组合输入状态机：raw、preedit 与 commit}
+
+\begin{goals}
+掌握输入法的最小状态模型；理解 raw、preedit、marked text 和 committed text 的区别；能够正确处理退格、取消、部分选择与会话结束。
+\end{goals}
+
+中文输入不是一次按键对应一次字符。用户输入 \code{nihao} 时，六个字母先构成 \term{raw buffer}；引擎可能把它切分并显示为 \code{ni'hao}，这是 \term{preedit}；用户选中“你好”以后才产生最终提交文本。组合期间显示的内容属于客户端文本系统，但仍由输入法管理。
+
+\figmp{2}{输入法组合状态机及关键转移}
+
+\section{三个文本层次}
+
+\begin{description}
+  \item[raw] 用户实际输入、可继续编辑的字母序列；
+  \item[preedit] 为帮助理解而格式化的组合表示，例如插入音节边界；
+  \item[converted/marked] 客户端中带标记样式显示的当前转换结果；
+  \item[commit] 取消标记、成为普通文档内容的最终文本。
+\end{description}
+
+初级实现可以让 marked text 始终等于 raw。高级实现可以显示“已转换前缀＋未转换拼音”。无论采用哪种 UI，都必须维持一个不变量：\textbf{客户端里的 marked range 与控制器认为的组合状态一致。}
+
+MyIME 通过专门方法构造并设置组合文本：
+
+\lstinputlisting[language=Swift,firstline=396,lastline=450,caption={引擎更新、候选窗刷新与 marked text 设置}]{../../MyIME/MyIME/Controller/MyIMEInputController.swift}
+
+\section{状态不变量}
+
+可以用以下不变量检查控制器：
+
+\begin{enumerate}
+  \item \code{raw.isEmpty} 时不应保留可见候选窗；
+  \item 取消或提交后，raw、preedit、高亮索引与展开状态应一起复位；
+  \item 高亮索引必须落在当前可见候选范围内；
+  \item 候选消费的 raw 长度不能超过输入长度；
+  \item 客户端失活时不能把旧组合错误提交到新客户端。
+\end{enumerate}
+
+\section{部分消费}
+
+候选不一定消费全部输入。例如用户输入 \code{beijingdaxue}，如果选择只消费 \code{beijing} 的“北京”，剩余 \code{daxue} 应继续参与下一轮候选生成。设输入长度为 \(n\)，候选消费长度为 \(k\)，则：
+
+\[
+  \text{remainingRaw}=\text{raw}[k\ldots n).
+\]
+
+这个看似简单的切片必须明确以字节、Unicode scalar 还是 Swift \code{String.Index} 计算。MyIME 对 raw 进行 ASCII 归一化，因此消费长度可以稳定对应字母数量；若未来允许带声调 Unicode 字符，模型必须重新审视。
+
+\begin{warningbox}[会话结束]
+应用切换、输入源切换、窗口关闭和输入法进程退出都可能结束组合。工程实现要明确选择“提交首选”“提交原始拼音”还是“取消”。不能让一段旧组合在下一次激活时幽灵般出现。
+\end{warningbox}
+
+\begin{lab}[纸上状态机]
+从空闲态开始，逐步执行：输入 \code{nihao}、按左方向键、按数字 2、切换到 ABC、再切回 MyIME。每一步写出 raw、候选、高亮、marked text 与文档最终文本。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么 preedit 不应被当作最终文档文本？
+  \item 若候选消费长度计算少 1，会出现哪些用户可见症状？
+  \item 为“应用失去焦点”设计三种策略，并比较数据安全与用户体验。
+\end{enumerate}
+
+\begin{summarybox}
+组合输入的本质是一个有明确所有权的临时事务。raw 是输入法状态，marked text 是客户端中的映射，commit 才是最终文档内容。
+\end{summarybox}
+
+
+\chapter{用协议隔离系统与算法}
+
+\begin{goals}
+理解为什么输入法核心不应依赖 AppKit；能够通过协议注入词库和引擎；掌握可测试数据模型的最小集合。
+\end{goals}
+
+IMKInputController 很难在普通单元测试中实例化，因为它依赖系统输入会话。若拼音切分、候选排序和用户学习都写在控制器里，算法只能通过手工敲字验证。MyIME 将核心放入独立 Swift Package \sourcefile{IMEKit}，控制器只负责事件与 UI 适配。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=109,caption={候选、引擎输出、偏好和 IMEEngine 协议}]{../../MyIME/IMEKit/Sources/IMEKit/Models.swift}
+
+\section{输入与输出应是值}
+
+\code{EngineOutput} 是一次更新的快照，包含 preedit、候选、是否还有更多结果和归一化 raw。值类型让测试可以完整比较结果，也避免候选窗在引擎下一次更新后意外看到被修改的共享数组。
+
+候选至少需要：显示文本、读音路径、分数和消费长度。数据库 ID 便于回溯词条，但 UI 不应依赖 ID 的业务含义。用户词使用负 ID 是当前实现的内部约定，课堂中应把这种约定封装在存储层。
+
+\section{协议提供替身}
+
+词库协议 \code{CandidateLookup} 允许真实 SQLiteStore 与测试 MemoryStore 被同一个引擎使用。这样可以构造只有“天气”和“田七”的微型世界，精确验证上下文是否改变排序。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=69,caption={测试使用的内存词库与上下文词库}]{../../MyIME/IMEKit/Tests/IMEKitTests/IMEKitTests.swift}
+
+\begin{concept}[依赖方向]
+系统层可以依赖纯逻辑层，纯逻辑层不能反过来依赖 InputMethodKit。数据库实现依赖 SQLite，但引擎只依赖查询协议。候选窗口依赖模型，却不应该执行词库 SQL。这种单向依赖使每层都能被独立替换。
+\end{concept}
+
+\section{线程安全不是加一个标记}
+
+源码中部分类型声明为 \code{@unchecked Sendable}，意味着编译器把线程安全证明交给程序员。它不是“消除警告”的装饰。Engine 使用锁保护提交历史，UserStore 需要串行化写入。教学答辩应要求学生指出每个共享可变状态由谁保护，而不是只展示通过编译。
+
+\begin{lab}[替换引擎]
+实现 \code{EchoEngine: IMEEngine}：输入任何 raw，都返回一个将 raw 大写的候选。把它注入教学控制器，证明 UI 和事件层不依赖中文算法。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么 \code{EngineOutput} 适合结构体，而控制器适合类？
+  \item 为 \code{CandidateLookup} 设计一个网络实现是否违反 MyIME 的离线目标？架构上能否实现？
+  \item 找出模型中最可能在加入双拼后变化的字段，说明兼容策略。
+\end{enumerate}
+
+\begin{summarybox}
+可教学、可测试的输入法需要把系统适配与算法核心分开。协议、值类型快照和内存替身共同形成可验证边界。
+\end{summarybox}
+
+
+\chapter{从小词库生成第一组中文候选}
+
+\begin{goals}
+建立“读音键到词条集合”的最小词库模型；理解精确匹配、前缀匹配、同音词和稳定排序；完成第一个能从 \code{nihao} 输出“你好”的引擎。
+\end{goals}
+
+教学版词库可以从十行 TSV 开始：每行包含词语、带撇号的拼音和权重。例如：
+
+\begin{lstlisting}[numbers=none,caption={最小教学词库}]
+你好    ni'hao      65535
+拟好    ni'hao      12000
+世界    shi'jie     65535
+北京    bei'jing    65535
+背景    bei'jing    48000
+我      wo          65535
+是      shi         65535
+中国    zhong'guo   65535
+人      ren         65535
+\end{lstlisting}
+
+将拼音中的撇号移除可得到查找键 \code{nihao}。最简单的查询是筛选所有键等于 raw 的词条，再按权重降序排列。即使只有这一步，也必须规定权重相同的稳定次序，否则相同输入在不同运行中可能改变候选位置。
+
+\section{前缀匹配与完整匹配}
+
+用户输入到一半时也需要候选。若 \code{entryKey.hasPrefix(raw)}，可以把词条作为补全候选，但必须施加补全惩罚；否则只输入 \code{b} 就可能让长专名淹没单字。一个基础评分可以写成：
+
+\[
+S(w)=\alpha\cdot \frac{f(w)}{65535}-\lambda\cdot\Delta_{\mathrm{completion}},
+\]
+
+其中 \(f(w)\) 是词库权重，\(\Delta_{\mathrm{completion}}\) 是候选比用户输入多出的音节数。
+
+\section{接口而非文件格式}
+
+真实项目用 SQLiteStore 实现查询接口。控制器和引擎不应该知道词库来自 TSV、SQLite 还是内存。以下协议片段体现了查询、用户加权和上下文加权三类职责：
+
+\lstinputlisting[language=Swift,firstline=1,lastline=40,caption={CandidateLookup 的查询抽象}]{../../MyIME/IMEKit/Sources/IMEKit/SQLiteStore.swift}
+
+\begin{lab}[十词输入法]
+用十条词构建 MemoryStore，实现 \code{nihao}、\code{beijing} 和 \code{woshizhongguoren}。第一阶段只允许完整词匹配；第二阶段加入前缀匹配。比较只输入 \code{b} 时的候选变化。
+\end{lab}
+
+\section{候选的可解释性}
+
+课堂项目应为调试模式提供候选解释：词库权重、完整/前缀状态、消费长度、最终得分。商业 UI 可以隐藏这些信息，教学版必须显示。只有可解释，学生才能回答“为什么背景排在北京前面”，而不是不断调一个神秘常量。
+
+\exercises
+\begin{enumerate}
+  \item 权重相同时，选择词语字典序还是数据库 ID 作为 tie-breaker，各有什么影响？
+  \item 为什么不能直接用百万词库开始调试？
+  \item 给出一种让“北京”在输入 \code{beij} 时出现、但不让它在 \code{b} 时过度靠前的惩罚函数。
+\end{enumerate}
+
+\begin{summarybox}
+词库查询的第一原则是可控：小数据、明确键、稳定排序和可解释分数。规模应在正确性之后加入。
+\end{summarybox}
+
+
+\chapter{候选窗口：把算法结果变成可操作界面}
+
+\begin{goals}
+理解候选窗口与普通应用窗口的差异；掌握候选分页、高亮、数字选择和插入点定位；能够分离候选数据更新与窗口布局。
+\end{goals}
+
+候选窗口是输入法最直接的反馈通道。它必须快速、克制，并且不能抢走客户端焦点。MyIME 使用 SwiftUI 描述候选列表，再由 AppKit 窗口控制器承载。此结构便于样式开发，但坐标、层级和激活策略仍属于 AppKit 世界。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=93,caption={SwiftUI 候选列表视图}]{../../MyIME/MyIME/UI/CandidateWindow.swift}
+
+\section{候选窗口不应成为主窗口}
+
+如果候选窗成为 key window，原应用可能失去键盘焦点，下一次按键不再进入原输入会话。窗口通常使用无标题、不可激活、较高层级，并在组合结束后立即隐藏。课堂测试不能只看“窗口出现”，还要验证光标仍在 Notes 文档中。
+
+\section{定位坐标}
+
+客户端提供插入点附近的矩形，候选窗应放在其下方；若接近屏幕底部，则翻到上方；横向位置也需限制在可见屏幕内。设光标矩形为 \(R_c\)，窗口大小为 \((w,h)\)，屏幕可见区域为 \(R_s\)，基础位置可写成：
+
+\[
+x=\min(\max(R_c.x,R_s.x),R_s.x+R_s.w-w),
+\]
+\[
+y=\begin{cases}
+R_c.y-h-g, & \text{下方空间足够},\\
+R_c.y+R_c.h+g, & \text{否则放在上方}.
+\end{cases}
+\]
+
+其中 \(g\) 是视觉间距。真正容易出错的并不是这个夹取公式，而是把属于不同空间的矩形直接相加。
+
+\subsection{macOS 中的三层坐标空间}
+
+候选窗定位至少涉及三种坐标：
+
+\begin{enumerate}
+  \item \textbf{全局屏幕坐标}：\code{NSScreen.frame}、\code{visibleFrame} 和 \code{NSWindow.frame} 使用同一全局桌面空间，主显示器通常以左下角为原点；显示器排列在主屏左侧或下方时，次屏原点可能为负数。
+  \item \textbf{窗口/视图坐标}：AppKit 视图默认从左下角计量，但 \code{isFlipped=true} 的视图从左上角向下增长；SwiftUI 布局有自己的局部空间。局部坐标必须通过窗口转换后才能与屏幕矩形比较。
+  \item \textbf{输入客户端给出的行框}：\code{attributes(forCharacterIndex:lineHeightRectangle:)} 返回插入点所在文本行的屏幕矩形。MyIME 将该 \code{lineRect} 直接与 \code{NSScreen.frame} 比较，因此不能再调用一次 \code{convertToScreen}，否则会发生二次偏移。
+\end{enumerate}
+
+\figmp{15}{AppKit 全局屏幕坐标、客户端行框与候选 NSPanel 的关系}
+
+在 MyIME 中，\code{anchor.minY} 是行框下边缘。优先位置为 \(y_b=anchor.minY-h-g\)；如果 \(y_b<visibleFrame.minY\)，候选窗翻到文本行上方：\(y_a=anchor.maxY+g\)。最后再同时夹取 \(x\) 与 \(y\)，避免菜单栏、Dock、刘海安全区和多显示器边缘造成越界。
+
+\begin{warningbox}[lineHeightRectangle 并非永远可信]
+某些 WebKit/Electron 客户端会短暂返回零矩形、过期矩形或与当前 selectedRange 不一致的结果。MyIME 在空矩形时退回鼠标位置；教学版还应记录一次脱敏诊断并隐藏窗口，不能让错误坐标导致崩溃。测试时务必覆盖主屏左侧/下方的次显示器，因为只测主屏会掩盖负坐标问题。
+\end{warningbox}
+
+\figmp{9}{候选窗口相对于插入点和可见屏幕的定位}
+
+\lstinputlisting[language=Swift,firstline=94,lastline=188,caption={候选窗口控制器的数据更新与展示}]{../../MyIME/MyIME/UI/CandidateWindow.swift}
+
+\section{分页与数字映射}
+
+若每页大小为 \(p\)，当前高亮索引为 \(i\)，页首为
+
+\[
+  b=\left\lfloor\frac{i}{p}\right\rfloor p.
+\]
+
+数字键 \(d\in\{1,\ldots,9\}\) 映射到候选索引 \(b+d-1\)。所有映射都必须在候选数组范围内检查。横向紧凑模式与展开模式可以使用不同页宽，但导航状态应保持一致。
+
+\section{VoiceOver 与无障碍高亮}
+
+颜色高亮只服务视觉用户。候选按钮还应向辅助技术提供“序号、候选文本、是否当前选中、可执行动作”。SwiftUI 可以为每行增加如下语义：
+
+\begin{lstlisting}[language=Swift,caption={候选按钮的 VoiceOver 语义规范}]
+.accessibilityElement(children: .ignore)
+.accessibilityLabel("候选 \(index + 1)，\(candidate.word)")
+.accessibilityValue(index == highlighted ? "当前候选" : "")
+.accessibilityAddTraits(index == highlighted ? [.isSelected] : [])
+.accessibilityHint("按回车或对应数字键上屏")
+\end{lstlisting}
+
+高亮由方向键改变时，可在节流后发布 \code{announcementRequested} 通知，朗读“第 2 项，天气”；连续按键时不要为每个中间状态堆积播报。Apple 将 \code{.isSelected} 定义为“当前被选中的无障碍元素”，公告通知需要提供 announcement 与 priority。\footnote{参见 Apple Developer Documentation：\url{https://developer.apple.com/documentation/swiftui/accessibilitytraits/isselected} 与 \url{https://developer.apple.com/documentation/appkit/nsaccessibilityannouncementrequestednotification}。}
+
+非激活 NSPanel 不应强制抢占 VoiceOver 焦点。验收时同时检查：鼠标点击候选、键盘导航、VoiceOver 朗读顺序、放大字体、提高对比度和“减少透明度”。辅助语义不能依赖颜色或仅显示在视觉标题中的空格对齐。
+
+\begin{lab}[边缘定位]
+在屏幕四角各放置一个文本框，输入拼音并截图候选窗。检查是否越界、遮挡插入点或跳到另一块显示器。把次显示器依次摆在主屏左侧和下方，记录负坐标。再改变系统缩放与候选字体大小重复实验，并用 VoiceOver 朗读前三个候选。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么候选窗口不能通过普通 \code{NSApp.activate} 获得焦点？
+  \item 当候选不足一页时，按数字 9 应消费事件还是放行？
+  \item 设计一个对 VoiceOver 友好的候选行语义。
+\end{enumerate}
+
+\begin{summarybox}
+候选窗口既是 UI，也是输入会话的一部分。正确性包括不抢焦点、坐标不越界、数字映射稳定以及组合结束后立即消失。
+\end{summarybox}
+
+
+\chapter{偏好设置、繁简输出与可观察性}
+
+\begin{goals}
+理解运行时偏好如何从 UI 传播到引擎；区分词库语言与输出转换；建立最小日志与状态菜单，使用户能够判断输入源是否真的连接。
+\end{goals}
+
+输入法设置不是独立 App 的静态配置。候选数量、方向、字体、模糊音和繁体输出都可能在下一次按键立即影响结果。MyIME 把偏好编码为 \code{EnginePrefs}，写入共享 UserDefaults suite，并发布本进程通知。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=120,caption={设置界面中的候选、外观与模糊音选项}]{../../MyIME/MyIME/UI/SettingsView.swift}
+
+\section{设置传播的三个问题}
+
+每个选项都应回答：谁写入、谁读取、何时生效。若设置窗口与输入法服务最终运行在不同进程，仅使用进程内 NotificationCenter 就不够；如果它们在同一进程，共享通知可以即时刷新。课堂设计文档必须明确进程边界。
+
+\section{繁体输出是映射，不是另一套词库}
+
+MyIME 默认使用简体词库和学习记录，繁体选项在显示与提交阶段转换文本。转换必须优先匹配长词，否则逐字转换会把“头发”的“发”和“开发”的“发”混为一谈。
+
+\lstinputlisting[language=Swift,firstline=1,lastline=39,caption={最长优先的繁体转换器}]{../../MyIME/IMEKit/Sources/IMEKit/TraditionalConverter.swift}
+
+若映射集合为 \(M\)，从位置 \(i\) 开始选择最长可匹配键 \(k\)，然后输出 \(M(k)\) 并前进 \(|k|\)。该算法是贪心的；成立前提是映射表以词组覆盖字符歧义。教学时可用“头发后台开发”验证短键不会提前吞掉长词。
+
+\section{状态菜单是诊断界面}
+
+菜单栏显示“中”不应是装饰，而应反映系统真实输入源状态。MyIME 在输入源变化通知到来时重新查询 TIS 状态，并显示“中”或“A”。这使普通用户能区分“应用启动了”和“MyIME 已选中”。
+
+\lstinputlisting[language=Swift,firstline=70,lastline=127,caption={输入源变化观察与状态菜单更新}]{../../MyIME/MyIME/App/IMKBootstrap.swift}
+
+\begin{lab}[设置即时生效]
+组合 \code{ci} 时切换 c/ch 模糊音，观察候选变化；调整字体和横纵方向；启用繁体后输入“头发后台开发”。记录哪些设置立即生效，哪些需要重新建立输入会话。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么繁简转换应该在候选显示和最终上屏两个位置保持一致？
+  \item 如果用户在组合过程中改变候选页大小，高亮索引应如何处理？
+  \item 设计一个完全本地的诊断面板，列出五项最有价值的信息。
+\end{enumerate}
+
+\begin{summarybox}
+偏好设置必须有清晰的数据流和生效时机。繁体输出是显示层转换，状态菜单则是帮助用户理解真实系统状态的可观察性工具。
+\end{summarybox}
+
+
+\chapter{第一次端到端验收}
+
+\begin{goals}
+把编译、安装、注册、选择、输入和恢复组成一份可重复验收脚本；学会记录预期、实际和证据；完成初级篇里程碑。
+\end{goals}
+
+到本章为止，学生已经具备最小输入服务、组合状态、词库候选、候选窗和偏好设置。现在必须把它们放回真实系统。端到端验收不是“随便打几句话”，而是固定环境、固定步骤和固定判定标准。
+
+\section{基础验收矩阵}
+
+\begin{longtable}{p{3cm}p{4.2cm}p{4.2cm}}
+\toprule
+场景 & 操作 & 通过标准 \\
+\midrule
+空闲英文 & 切换 ABC，输入 \code{hello} & 原样出现，无候选窗 \\
+中文整词 & 切换 MyIME，输入 \code{nihao}＋空格 & 上屏“你好”，组合清空 \\
+退格 & 输入 \code{niha} 后退格 & raw 变为 \code{nih}，候选刷新 \\
+取消 & 输入拼音后按 Esc & 文档无新增，候选关闭 \\
+数字选词 & 输入同音拼音后按 2 & 第二候选上屏一次 \\
+应用切换 & 组合中切到另一应用 & 无旧组合串入新应用 \\
+进程恢复 & 结束进程，ABC→MyIME & 服务重新启动并可输入 \\
+\bottomrule
+\end{longtable}
+
+\section{目标应用分层}
+
+第一层使用 Notes 或 TextEdit，代表系统原生文本控件。第二层使用 Safari 或 Chrome 的网页输入框；第三层使用 Electron 编辑器；第四层使用 WPS、微信等大型应用。若第一层失败，不要继续用更多应用制造噪声。若只有第三层失败，问题更可能在组合协议兼容，而不是词库。
+
+\section{记录证据}
+
+每次失败至少记录：系统版本、芯片、应用与版本、当前输入源、输入序列、控制器日志、文档最终文本、是否显示候选窗。对于“偶尔失效”，再增加重复次数和触发前操作。没有输入序列的“不能用”无法形成回归测试。
+
+\figmp{11}{输入法测试金字塔：大量纯逻辑测试、适量集成测试、少量跨应用人工验收}
+
+\begin{lab}[初级篇里程碑]
+在 Notes 与一个浏览器中完成上述矩阵。提交一段不超过 3 分钟的演示录像，以及一份包含失败尝试的测试记录。允许存在缺陷，但不允许隐去缺陷。
+\end{lab}
+
+\exercises
+\begin{enumerate}
+  \item 为什么录像不能替代结构化测试记录？
+  \item Notes 成功而 Chrome 失败时，应如何缩小范围？
+  \item 设计一条覆盖“部分候选消费＋继续组合”的端到端用例。
+\end{enumerate}
+
+\begin{summarybox}
+初级篇的终点不是候选窗出现，而是形成一套可重复的端到端证据。之后的高级算法改动都必须重新通过这条基线。
+\end{summarybox}

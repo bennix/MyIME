@@ -1,0 +1,399 @@
+\chapter{Swift 与并发速查}
+
+本附录只收录理解 MyIME 必需的 Swift 概念。
+
+\section{值类型与引用类型}
+
+\code{struct} 复制值，适合 Candidate、EngineOutput 和偏好快照；\code{class} 具有对象身份，适合控制器、数据库连接和窗口控制器。包含数组的结构体仍享受写时复制，但跨线程安全要看元素与访问方式。
+
+\section{协议与 existential}
+
+\code{any CandidateLookup} 表示运行时持有任意满足协议的对象；泛型 \code{Engine<Store: CandidateLookup>} 则在编译期特化。前者便于替换与保存，后者可能有性能优势。输入法查询开销主要在数据库与搜索，当前 existential 通常不是瓶颈。
+
+\section{可选值与 guard}
+
+系统 API 大量返回可选值。控制器入口宜用 guard 验证 client、字符和范围，把失败路径尽早放行或降级。不要为了减少代码而强制解包客户端对象。
+
+\section{Sendable、锁与队列}
+
+\code{Sendable} 表示值可以安全跨并发域传递；\code{@unchecked Sendable} 表示作者自行保证。常见保护方法包括：
+
+\begin{itemize}
+  \item 不可变值快照；
+  \item \code{NSLock.withLock} 保护小型同步状态；
+  \item 串行 DispatchQueue 保护 SQLite 写入；
+  \item Actor 隔离异步状态；
+  \item \code{@MainActor} 限制 UI 和 App 生命周期。
+\end{itemize}
+
+\begin{warningbox}
+不要在持有状态锁时执行 SQL、调用客户端或刷新 UI。锁的临界区只读写必要字段，避免重入和主线程卡顿。
+\end{warningbox}
+
+\section{输入法线程模型：先画所有权，再写并发代码}
+
+输入法没有“所有工作都在后台越快越好”这一选项。IMK 事件回调、NSPanel 和 SwiftUI 更新属于 UI/会话层，MyIME 用 \code{@MainActor} 把它们限制在主执行器；用户数据库写入可以串行异步执行；引擎计算保持同步、短小，并以不可变 \code{EngineOutput} 快照返回 UI。
+
+\figmp{14}{MyIME 的线程模型：主执行器处理会话与 UI，UserStore 队列串行持久化}
+
+\begin{longtable}{p{3.1cm}p{3.4cm}p{4.6cm}}
+\toprule
+对象/操作 & 推荐执行域 & 原因与约束 \\
+\midrule
+IMK 回调、客户端调用 & MainActor & 输入会话有严格顺序，客户端对象不可跨线程长期持有 \\
+\code{CandidateWindow}/\newline\code{NSPanel} & MainActor & AppKit UI 必须在主线程更新 \\
+Engine.update & 调用线程，受时间预算限制 & 返回值快照；不得在其中等待异步写入 \\
+提交历史 & NSLock 短临界区 & 只复制/更新少量值，禁止锁内 SQL 和 UI \\
+UserStore.learn & 私有串行队列 & 保证 SQLite 写入顺序，不阻塞按键路径 \\
+system.sqlite 查询 & 连接所有者线程/受控同步 & 只读；同一 statement 不得无保护并发复用 \\
+\bottomrule
+\end{longtable}
+
+\subsection{@MainActor、Sendable 与 @unchecked Sendable 分别保证什么}
+
+\code{@MainActor} 是隔离规则：编译器要求相关状态和方法在主执行器访问。\code{Sendable} 是跨并发边界的值安全承诺；像 Candidate 这样的不可变结构体适合自动满足。\code{@unchecked Sendable} 则表示“编译器不再证明，由作者负责”，必须在代码评审中附带同步策略。它绝不能成为消除警告的通用修饰符。
+
+\subsection{NSLock 的两条铁律}
+
+第一，锁保护的是一个写明的不变量，而不是“这一整个函数”；第二，不调用未知代码。客户端、闭包、日志格式化和 SQLite 都可能重入或阻塞。正确形式是锁内复制状态、立即解锁，再执行外部操作：
+
+\begin{lstlisting}[language=Swift,caption={缩短锁临界区}]
+let history = stateLock.withLock { committedHistory }
+// 锁已经释放；下面可以查词、评分和刷新 UI。
+let anchors = contextAnchors(last: history.last,
+                             beforeLast: history.beforeLast)
+\end{lstlisting}
+
+\begin{lab}[画线程所有权图]
+从一次候选选择开始，标出回调线程、Engine、NSLock、UserStore 队列和 SQLite。对每条跨域箭头写出传递的数据类型；若传的是 client、NSWindow 或可变数组，说明为何危险并改成值快照。
+\end{lab}
+
+\section{String 索引}
+
+Swift String 按扩展字素簇索引，不支持任意整数下标。raw 被归一化为 ASCII 时可以安全按字符数量推导消费长度；汉字候选的 \code{count} 是字符数量，不等于 UTF-8 字节数。数据库和 C API 交界处必须明确编码单位。
+
+
+\chapter{InputMethodKit 与 TIS 速查}
+
+\section{核心类型}
+
+\begin{longtable}{p{4cm}p{7.2cm}}
+\toprule
+类型/方法 & 教学意义 \\
+\midrule
+\code{IMKServer} & 注册输入法服务连接，由系统发现控制器 \\
+\code{IMKInputController} & 每个输入会话的事件与组合控制对象 \\
+\code{IMKTextInput} & 客户端文本协议，提供 marked/insert/range/coordinate \\
+\code{handle(_:client:)} & NSEvent 路径的事件入口之一 \\
+\code{inputText(_:client:)} & 文本形式输入入口之一 \\
+\code{setMarkedText} & 设置尚未最终提交的组合文本 \\
+\code{insertText} & 提交普通文档文本 \\
+\code{commitComposition} & 系统要求结束组合 \\
+\code{activateServer} & 控制器会话被激活 \\
+\code{deactivateServer} & 控制器会话失活，应处理残留状态 \\
+TIS API & 枚举、注册、选择输入源和监听变化 \\
+\bottomrule
+\end{longtable}
+
+\section{常见按键语义}
+
+硬件键码与字符不是一回事。字符受到键盘布局与修饰键影响，键码更接近物理位置。处理普通字母优先使用字符；处理方向键、退格和功能键可使用键码或特殊字符，并在目标系统实测。
+
+\begin{longtable}{p{2.3cm}p{3.7cm}p{5.2cm}}
+\toprule
+按键 & 组合态默认 & 必测边界 \\
+\midrule
+字母 a--z & 追加 raw & Shift、Caps Lock、Option \\
+Backspace & 删除 raw 尾字符 & raw 为空时放行 \\
+Space & 选择首选 & 无候选、空闲态 \\
+Return & 当前候选或原文上屏 & 导航前后行为 \\
+Esc & 取消组合 & 空闲态不吞键 \\
+1--9 & 数字选词 & 页首偏移、越界 \\
+左右方向 & 移动高亮/光标策略 & 首尾边界 \\
+上下方向 & 翻页或移动高亮 & 横纵候选布局 \\
+Command 组合 & 通常放行 & 复制、撤销、切应用 \\
+\bottomrule
+\end{longtable}
+
+\section{AppKit 坐标转换专题}
+
+排查候选窗错位时，先给每个矩形标记所属空间，而不是立即加减常量：\code{R_screen} 表示 NSScreen 全局空间，\code{R_window} 表示窗口内容空间，\code{R_view} 表示视图局部空间，\code{R_line} 表示输入客户端返回的行框。
+
+\figmp{15}{坐标排错图：lineHeightRectangle 与 NSPanel 位于全局屏幕空间}
+
+若一个点来自普通 NSView，可按“view→window→screen”转换：先用 \code{view.convert(point, to:nil)} 得到窗口内容坐标，再用 \code{window.convertPoint(toScreen:)} 得到全局坐标。反向转换时顺序反过来。若 API 已明确返回屏幕矩形，则不要再次转换。
+
+多显示器验收至少包含以下排列：右侧次屏、左侧次屏（负 \(x\)）、下方次屏（负 \(y\)）和不同缩放比例。永远用命中的 \code{screen.visibleFrame} 夹取候选窗；不要只用 \code{NSScreen.main}，因为 main 表示当前主屏，不一定是插入点所在屏。
+
+
+\chapter{算法推导与第二方法验证}
+
+\section{切分的动态规划形式}
+
+令 \(R[j]\) 表示到位置 \(j\) 的前若干最优路径。初始化 \(R[0]=\{\epsilon\}\)。对每个 \(i<j\)，若 \(x[i:j]\) 为合法音节，则：
+
+\[
+R[j]\leftarrow \operatorname{TopK}\{p\oplus x[i:j]\mid p\in R[i]\}.
+\]
+
+该方法与递归枚举的结果可以互相验证。递归更直观，动态规划更容易复用前缀结果。加入模糊音、简拼和错拼后，边携带代价，TopK 按消费完整性与总代价排序。
+
+\section{Viterbi 与 Beam 的关系}
+
+若每个位置只需保留一个与未来充分相关的状态，Viterbi 可保证最优。输入法需要 top-k，且转移依赖末词、用户上下文和多种特征，因此状态空间扩大。Beam Search 在每个位置保留有限假设，是可控近似。
+
+为验证 Beam，教学中构造一个小词格，完整枚举路径集合 \(\Pi\)：
+
+\[
+\pi^*=\arg\max_{\pi\in\Pi}S(\pi).
+\]
+
+再检查 Beam 宽度充分大时首选等于 \(\pi^*\)。若宽度变小时结果改变，应展示被剪路径在哪一层落出前 \(B\) 名。
+
+\section{对数域数值示例}
+
+假设词“今天”“天气”“很好”的条件概率分别为 0.05、0.12、0.20，则句子概率为
+
+\[
+0.05\times0.12\times0.20=0.0012.
+\]
+
+对数分数为
+
+\[
+\log0.05+\log0.12+\log0.20\approx-2.996-2.120-1.609=-6.725.
+\]
+
+比较两个候选时，对数单调性保证排序不变。每条边只需加法，且不会在长句上快速下溢。
+
+\section{平滑}
+
+未见 bigram 不能直接令整条路径概率为零。可以使用加性平滑、退避或插值：
+
+\[
+P(w_i\mid w_{i-1})=\lambda P_{bi}(w_i\mid w_{i-1})+(1-\lambda)P_{uni}(w_i).
+\]
+
+MyIME 当前使用奖励式统计而非严格归一概率，教学者应明确这是工程评分函数。二者都可用，但不能把“分数”错误称为经过校准的概率。
+
+
+\chapter{词库流水线与可复现数据工程}
+
+运行时词库只是最终产物，教学还应理解来源下载、编码统一、拼音归一、去重、频率融合、噪声过滤、索引构建与许可清单。MyIME 的规范给出一条可复现流水线。
+
+\lstinputlisting[language=bash,firstline=30,lastline=90,caption={词库归一化和中间格式规范}]{../../docs/DICTIONARY_PIPELINE.md}
+
+\section{建议的中间格式}
+
+所有来源先转换为统一 CIF：
+
+\begin{lstlisting}[numbers=none]
+word<TAB>pinyin_with_apostrophe<TAB>weight<TAB>source_mask
+北京<TAB>bei'jing<TAB>64000<TAB>4
+\end{lstlisting}
+
+归一化包括 Unicode NFC、空白清理、简繁策略、拼音小写、\code{ü→v}、音节合法性和权重范围。每条被丢弃记录应有原因计数，避免流水线静默吞掉大批数据。
+
+\section{去重与来源保留}
+
+相同词语和读音可能来自多个来源。可以合并权重并 OR 来源位掩码，使设置界面允许禁用某类词库。词语相同、读音不同不能简单去重；多音字需要保留独立记录。
+
+\section{可复现性}
+
+来源锁文件应固定 URL、版本、校验和和许可证。构建脚本不得悄悄抓取“最新版”覆盖输入。最终数据库记录 schema 版本、构建时间、流水线版本与来源摘要；Release 测试验证资源存在、完整且条数在合理区间。
+
+\begin{lab}[小型词库构建]
+选择两个许可明确的小词表，转换 CIF、去重、构建 SQLite，并输出每阶段统计。第二名同学在另一台机器运行同一脚本，比较数据库内容哈希或规范化导出哈希。
+\end{lab}
+
+
+\chapter{故障排查手册}
+
+\section{先确认系统版本：版本防坑矩阵}
+
+输入法依赖 TIS、InputMethodKit、Gatekeeper 和宿主文本客户端，升级 macOS 后必须重新跑发布验收。表中的“现象”来自 MyIME 项目测试与应重点回归的风险，不应解释为 Apple 对所有版本作出的永久 API 保证。
+
+\begin{longtable}{p{2.0cm}p{4.1cm}p{6.0cm}}
+\toprule
+系统 & 常见现象或风险 & MyIME 的处理与验证 \\
+\midrule
+macOS 13 & 新安装后列表或当前输入源状态未立即刷新 & 核对安装路径、Bundle ID 与 TIS 枚举；切换 ABC→MyIME 或重新登录后复测，不让常驻守护进程掩盖问题 \\
+macOS 14 & 签名、公证、隔离属性与实际启动路径差异更容易被误判为算法故障 & 从公开 DMG 安装，分别检查 \code{codesign}、\code{spctl}、stapler 与进程真实路径；清除精确旧副本而非模糊批量删除 \\
+macOS 15 & 不同宿主对 marked text、replacement range 与生命周期回调仍可能表现不同 & 固定 Notes、Safari、Chrome/Electron 兼容矩阵；升级后重跑事件所有权和失活/恢复用例 \\
+macOS 26 & 项目实测中，对已经启用的输入源重复调用 \code{TISEnableInputSource} 可能再次出现敏感授权提示 & 安装器先查 \code{kTISPropertyInputSourceIsEnabled}；已启用则跳过；仅在输入源缺失或版本变化时重新注册，并在干净目标机验证 \\
+后续版本 & 安全 UI、缓存时机或客户端实现可能变化 & 把系统版本写进诊断包；发布门禁覆盖当前版与前一主版本；现象与规避方案带日期记录 \\
+\bottomrule
+\end{longtable}
+
+尤其要区分“代码事实”和“平台推断”。当前 \sourcefile{SelfInstaller.swift} 的防重复策略是可审查事实；“所有 macOS 26 机器必定弹窗”则不是。课程报告应写成“在系统版本、构建号、安装状态 X 下观察到 Y；采用 Z 后复测”，不要把单机经验写成 API 规范。
+
+\section{升级后的十分钟回归}
+
+从干净账户安装公证 DMG；确认简体中文列表出现 MyIME；在 Notes 完成中文、英文、退格和候选选择；在浏览器 \code{input}/\code{textarea}/\code{contenteditable} 重放同一序列；结束进程后通过 ABC→MyIME 恢复；开启 VoiceOver 检查候选朗读与焦点；最后导出带系统构建号的脱敏诊断包。任一步失败都先保留证据，再决定是否修改注册逻辑。
+
+\section{系统列表没有 MyIME}
+
+检查顺序：安装路径→应用包 Info.plist→Bundle ID/输入源 ID→签名可读性→TIS 枚举→缓存刷新。不要先修改候选算法。若存在多个相同 Bundle ID 副本，先解析实际路径，再按安装器设计清理具体旧副本。
+
+\section{能看到 MyIME，但中英文都打不出来}
+
+先验证当前输入源确实选中；检查进程路径和 IMKServer 日志；确认事件进入哪条回调；检查控制器是否错误地对未处理事件返回 true；临时用 EchoEngine 排除词库；在 Notes 建立最小复现。
+
+\section{有拼音下划线，没有候选}
+
+检查 normalized raw、切分路径数量、词库路径、integrity check、SQL 查询键和 disabledSourceMask。用 MemoryStore 复测同一 raw；若内存词库正常，问题集中在资源或查询层。
+
+\section{候选出现但无法上屏}
+
+检查数字/空格是否映射到有效索引、select 返回的消费长度、insertText 的客户端与 replacementRange、提交后清理顺序。若出现双字，检查事件是否既被输入法处理又被客户端处理。
+
+\section{Notes 正常，浏览器失败}
+
+比较事件入口、marked range、replacement range、坐标查询和失活顺序。用最小网页 \code{input}、\code{textarea} 和 \code{contenteditable} 分别测试，不要把整个复杂网站当作一个用例。
+
+\section{开发机正常，目标机失败}
+
+检查 Release 是否为 Developer ID 而非 Apple Development；验证公证和装订；确认目标机没有旧副本；检查 App Translocation 与进程实际路径；从公开下载链接重新获取，不要通过开发目录复制未公证包。
+
+\section{进程结束后无法恢复}
+
+确认 MyIME 仍是系统当前输入源；切换 ABC→MyIME 触发系统建立新会话；检查没有依赖登录守护进程；验证状态菜单反映真实 TIS 状态而不是固定显示“中”。
+
+
+\chapter{发布命令与验收清单}
+
+\section{纯引擎}
+
+\begin{lstlisting}[language=bash,numbers=none]
+swift test --package-path MyIME/IMEKit
+\end{lstlisting}
+
+\section{应用构建}
+
+\begin{lstlisting}[language=bash,numbers=none]
+xcodebuild build \
+  -project MyIME/MyIME.xcodeproj \
+  -scheme MyIME \
+  -configuration Release \
+  -destination 'platform=macOS'
+\end{lstlisting}
+
+\section{签名、公证与架构检查}
+
+\begin{lstlisting}[language=bash,numbers=none]
+codesign --verify --deep --strict --verbose=2 MyIME.app
+codesign -dv --verbose=4 MyIME.app
+spctl --assess --type execute --verbose=4 MyIME.app
+lipo -info MyIME.app/Contents/MacOS/MyIME
+xcrun stapler validate MyIME.app
+shasum -a 256 MyIME-1.0.10.dmg
+\end{lstlisting}
+
+\section{发布前人工清单}
+
+\begin{enumerate}[label=$\square$]
+  \item 版本号、构建号、下载文件名和主页一致；
+  \item 引擎测试、词库验证和 Release 构建通过；
+  \item arm64 与 x86\_64 均存在；
+  \item Developer ID 签名正确，无 development/ad-hoc 混入；
+  \item 公证 Accepted，票据装订并可验证；
+  \item SHA-256 文件与 DMG 匹配；
+  \item GitHub Release 下载链接匿名可访问；
+  \item 第二台 Mac 无旧副本，安装成功；
+  \item MyIME 出现在简体中文分类；
+  \item Notes、浏览器完成固定输入序列；
+  \item 结束进程后 ABC→MyIME 可恢复；
+  \item 隐私说明、第三方许可和版本说明同步。
+\end{enumerate}
+
+
+\chapter{术语表}
+
+\begin{longtable}{p{3.7cm}p{7.5cm}}
+\toprule
+术语 & 定义 \\
+\midrule
+候选 Candidate & 对当前输入可供用户选择的文本或符号 \\
+组合 Composition & 尚未最终提交、仍由输入法管理的输入事务 \\
+Raw buffer & 用户原始字母序列 \\
+Preedit & 组合阶段向用户展示的格式化输入表示 \\
+Marked text & 客户端中标记为正在组合的文本 \\
+Commit & 将组合结果转为普通文档文本 \\
+消费长度 & 某候选对应并移除的 raw 字符数量 \\
+输入源 Input Source & macOS 文本输入系统可选择的语言模式 \\
+IMKServer & InputMethodKit 服务端连接对象 \\
+IMKInputController & 处理一个输入会话的控制器 \\
+TIS & Text Input Source，枚举与选择输入源的系统接口 \\
+切分路径 & 将连续拼音解释为音节序列的一条路径 \\
+硬边界 & 用户用撇号显式指定的不可跨越音节边界 \\
+简拼 & 用音节声母首字母表示完整音节 \\
+模糊音 & 用户可配置的近似声母或韵母关系 \\
+词格 Word Lattice & 音节边界为顶点、词条为边的有向图 \\
+Beam Search & 每层只保留有限高分假设的近似搜索 \\
+Unigram & 单词自身统计 \\
+Bigram & 相邻两个词的条件统计 \\
+Golden test & 锁定特定输入与期望输出的回归测试 \\
+Top-k 准确率 & 正确答案位于前 k 个候选的样本比例 \\
+KSPC & 每输出一个字符所需平均按键数 \\
+P95 & 95\% 样本不超过的延迟分位数 \\
+Universal 2 & 同时包含 arm64 与 x86\_64 的 macOS 二进制 \\
+Developer ID & App Store 外分发所用的 Apple 开发者签名身份 \\
+公证 Notarization & Apple 对提交软件进行自动安全检查并签发票据 \\
+装订 Stapling & 将公证票据附着到应用或安装包 \\
+App Translocation & macOS 对部分下载应用采用的随机隔离运行路径 \\
+\bottomrule
+\end{longtable}
+
+
+\chapter{练习提示与参考方向}
+
+本附录不给出可以直接复制的完整作业答案，而给出验证方向。
+
+\section{初级篇提示}
+
+事件所有权问题优先构造最小 Echo 控制器，分别返回 true 和 false 比较最终文本。组合问题用纯 Swift reducer 列出状态，而不是直接在 IMK 回调里反复试。候选窗口问题先验证焦点，再验证坐标；窗口“看起来正确”不能证明输入会话没有被抢走。
+
+\section{切分提示}
+
+最长匹配失败的反例通常来自音节边界歧义。动态规划与递归两种方法应在小输入上完整枚举互相验证。容错规则每增加一种，都要检查精确输入首选不退化。
+
+\section{评分提示}
+
+先把每项映射到统一尺度，再讨论权重。调参时一次只关闭或改变一个特征，保存候选分解。若只看总分，很难判断改善来自正确上下文还是偶然长度偏差。
+
+\section{词格提示}
+
+在位置之外保留 lastWord，否则不同上下文假设会被错误合并。用完整枚举验证小图，用 Beam 验证大图性能；两种方法结果不一致时，先检查是否因 Beam 剪枝，而不是立即认定代码错误。
+
+\section{学习提示}
+
+用户选择次数使用对数或饱和函数，避免一次长期使用永久压倒系统词频。所有持久化测试都要重建 Engine 和 UserStore，防止只验证内存状态。
+
+\section{发布提示}
+
+开发机与目标机必须分开。签名检查读“Authority”和 Team ID，公证检查 Accepted 与 stapler validate，功能检查用固定输入序列。任何一步成功都不能替代其他步骤。
+
+
+\chapter{源码阅读路线图}
+
+若只用两小时了解项目，按以下顺序阅读：
+
+\begin{enumerate}
+  \item \sourcefile{README.md}：产品边界与构建入口；
+  \item \sourcefile{Models.swift}：输入、输出、偏好和协议；
+  \item \sourcefile{Segmenter.swift}：拼音路径；
+  \item \sourcefile{IMEKitTests.swift}：从测试理解预期行为；
+  \item \sourcefile{Engine.swift}：词查询、评分和词格；
+  \item \sourcefile{SQLiteStore.swift}：真实数据访问；
+  \item \sourcefile{MyIMEInputController.swift}：系统事件与组合；
+  \item \sourcefile{CandidateWindow.swift}：候选 UI；
+  \item \sourcefile{IMKBootstrap.swift}：服务生命周期；
+  \item \sourcefile{SelfInstaller.swift}：跨机器安装；
+  \item \sourcefile{build-release.sh}：公开发布门禁。
+\end{enumerate}
+
+若用一学期学习，则按本书正文顺序，从最小模型逐渐映射到这些文件。源码阅读时对每个方法写四行注释：输入、输出、持有状态、失败方式。对于任何 \code{@unchecked Sendable}、文件删除、外部进程启动和客户端调用，都额外写出安全假设。
+
+\begin{summarybox}
+阅读真实工程的目的不是逐行记忆，而是建立地图：事件从哪里来，状态在哪里改变，候选为何出现，数据写到哪里，发布物怎样获得信任。
+\end{summarybox}

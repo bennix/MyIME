@@ -1,5 +1,6 @@
 build/
 MyIME/IMEKit/.build/
+TeachingStarter/.build/
 *.xcresult
 .DS_Store
 .serena/
@@ -9,3 +10,14 @@ xcuserdata/
 dist/
 MyIME/.zcode/
 release/*.dmg
+docs/textbook/main.aux
+docs/textbook/main.idx
+docs/textbook/main.ilg
+docs/textbook/main.ind
+docs/textbook/main.log
+docs/textbook/main.pdf
+docs/textbook/main.toc
+docs/textbook/figures-*.mps
+docs/textbook/figures.log
+docs/textbook/figures.mpx
+docs/textbook/build-output.txt
