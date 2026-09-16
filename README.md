@@ -50,7 +50,7 @@ swift test --package-path TeachingStarter
 2. 打开 DMG，双击 `MyIME.app`；全新安装无需管理员授权，从 1.0.8 或更早版本升级时会请求一次授权以清理旧副本。
 3. 从 macOS 菜单栏的输入法菜单切换到 **MyIME**。
 
-v1.0.12 下载包使用 Developer ID Application 证书签名，但未提交 Apple 公证。如果 macOS 阻止首次打开，请在 Finder 中按住 Control 点击 `MyIME.app`，选择“打开”。
+v1.0.12 下载包使用 Developer ID Application 证书签名，并已通过 Apple 公证及装订公证票据，可直接验证安装包来源与完整性。
 
 ## 开发与测试
 
