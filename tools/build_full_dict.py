@@ -22,6 +22,7 @@ TONED_SYLLABLE = re.compile(
 SOURCE_SC_DICTIONARY = 2048
 SOURCE_XINHUA = 4096
 SOURCE_SEMANTIC_KB = 8192
+SOURCE_QINGJIAN = 16384
 
 
 def normalize_pinyin(value: str) -> str | None:
@@ -349,6 +350,38 @@ def add_semantic_kb(
     print(f"ChineseSemanticKB unique_words={len(words)} kept_rows={kept}")
 
 
+def add_qingjian(
+    entries: dict[tuple[str, str], tuple[str, int, int]],
+    path: Path,
+) -> None:
+    """Merge Qingjian's normalized word/pinyin/frequency table.
+
+    Qingjian already resolves polyphonic readings and mines conversational
+    phrases.  We preserve those exact readings instead of inferring them
+    character by character, then map its corpus counts onto MyIME's weight
+    range so the source improves recall without overwhelming existing sources.
+    """
+    rows: list[tuple[str, str, int]] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) != 3:
+            raise ValueError(f"{path}:{number}: expected word, pinyin, frequency")
+        word, raw_pinyin, frequency_text = fields
+        pinyin = normalize_pinyin(raw_pinyin)
+        if (not pinyin or not frequency_text.isdigit() or not (1 <= len(word) <= 12)
+                or len(pinyin.split("'")) != len(word)):
+            continue
+        rows.append((word, pinyin, int(frequency_text)))
+
+    scale = math.log1p(max((frequency for _, _, frequency in rows), default=1))
+    for word, pinyin, frequency in rows:
+        weight = round(12_000 + 47_000 * math.log1p(frequency) / scale)
+        merge_entry(entries, word, pinyin, weight, SOURCE_QINGJIAN)
+    print(f"Qingjian kept {len(rows)} rows")
+
+
 def build_character_readings(
     pronunciations: dict[str, set[str]],
     rime_rows: list[tuple[str, str, int, int]],
@@ -377,6 +410,7 @@ def build(
     sc_dictionary: Path | None,
     xinhua_dir: Path | None,
     semantic_kb_dir: Path | None,
+    qingjian_dict: Path | None,
     opencc_ts_phrases: Path | None,
     opencc_ts_characters: Path | None,
 ) -> None:
@@ -424,6 +458,8 @@ def build(
         add_sc_dictionary(entries, sc_dictionary, pronunciations, character_readings, converter)
     if semantic_kb_dir:
         add_semantic_kb(entries, semantic_kb_dir, pronunciations, character_readings, converter)
+    if qingjian_dict:
+        add_qingjian(entries, qingjian_dict)
 
     for number, line in enumerate(seed_path.read_text(encoding="utf-8").splitlines(), 1):
         fields = line.split("\t")
@@ -451,6 +487,7 @@ if __name__ == "__main__":
     parser.add_argument("--sc-dictionary", type=Path)
     parser.add_argument("--xinhua-dir", type=Path)
     parser.add_argument("--semantic-kb-dir", type=Path)
+    parser.add_argument("--qingjian-dict", type=Path)
     parser.add_argument("--opencc-ts-phrases", type=Path)
     parser.add_argument("--opencc-ts-characters", type=Path)
     args = parser.parse_args()
@@ -465,6 +502,7 @@ if __name__ == "__main__":
         args.sc_dictionary,
         args.xinhua_dir,
         args.semantic_kb_dir,
+        args.qingjian_dict,
         args.opencc_ts_phrases,
         args.opencc_ts_characters,
     )

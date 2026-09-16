@@ -52,8 +52,18 @@ private struct CandidateListView: View {
     @ViewBuilder private var candidateViews: some View {
         ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
             Button { onSelect(index) } label: {
-                Text(candidateTitle(candidate.word, at: index))
-                    .lineLimit(1)
+                HStack(spacing: 7) {
+                    Text(candidateTitle(candidate.word, at: index))
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    if prefs.showEnglishGloss, let gloss = candidate.gloss, !gloss.isEmpty {
+                        Text(gloss)
+                            .font(.system(size: max(11, prefs.fontSize - 5)))
+                            .foregroundStyle(index == highlighted ? Color.white.opacity(0.78) : Color.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: expanded ? 110 : 90, alignment: .leading)
+                    }
+                }
                     .frame(maxWidth: expanded ? .infinity : nil, minHeight: expanded ? 28 : 34, alignment: .leading)
                     .padding(.horizontal, expanded ? 7 : 9)
                     .padding(.vertical, 2)

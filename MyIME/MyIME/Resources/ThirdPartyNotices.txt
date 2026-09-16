@@ -38,6 +38,9 @@ Additional derived terms are included from:
   (this is a modified/derived data set, not an official upstream release)
 - renfei/dict revision f85efb9ffc788c7d79112448aed11b2225b3e0ac (MIT)
 - THUOCL by THUNLP revision a30ce79d895d01ab5132a5c74c29703ff7efb4cc (MIT)
+- Qingjian by qingjian-team revision 95511c16f5ae73c929865a57cd0e1a4f99c4066e
+  (GPL-3.0-or-later; normalized readings, corpus-derived frequencies, and offline English glosses;
+  upstream data terms retained)
 
 Candidate sentence ranking uses a compact trigram frequency model derived from the NLP Chinese
 Corpus project by Bright Xu / brightmart, revision 5dc872154777d24c897f957f1ec848fc7fd59aa9:

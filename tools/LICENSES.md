@@ -145,6 +145,21 @@ extracts Chinese surface words from synonym, antonym, abbreviation, abstraction,
 class lists for offline IME recall only, with author attribution recorded here. If upstream later
 publishes a conflicting license, this source MUST be re-reviewed under `docs/DICTIONARY_PIPELINE.md`.
 
+## Qingjian
+
+- Project: Qingjian by qingjian-team and contributors
+- Source: https://github.com/qingjian-team/qingjian
+- Revision: `95511c16f5ae73c929865a57cd0e1a4f99c4066e`
+- Code license: GNU General Public License 3.0 or later
+- Imported artifacts: `assets/lexicon/dict.tsv` and `assets/glossary/glossary-en.tsv`
+
+MyIME adapts Qingjian's normalized word/readings and corpus-derived frequencies into its SQLite
+dictionary, and displays its locally generated English glosses as optional candidate annotations.
+Qingjian's name and logo are not used. The imported data retains its upstream source terms:
+THUOCL (MIT), Unihan (Unicode License v3), Chinese Wikipedia (CC BY-SA 4.0), LCCC (MIT), and
+the official/common-word source notices documented by Qingjian. MyIME preserves attribution,
+pins the exact revision and checksums, and distributes the corresponding conversion source.
+
 ## Sources retained locally but not bundled
 
 The following requested source snapshots are present under `build/sources`, but their repositories

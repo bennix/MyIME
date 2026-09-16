@@ -285,6 +285,12 @@ final class MyIMEInputController: IMKInputController {
         let candidate = output.candidates[index]
         let result = engine.select(index, from: output)
         guard !result.commitText.isEmpty else { return }
+        if candidate.pinyinPath.isEmpty, result.remainingRaw.isEmpty {
+            // Dates and other literal shortcuts must not become a learned
+            // phrase under the pinyin of a previously selected fragment.
+            commit(composedPhrase + result.commitText, pinyin: [], client: client, learn: false)
+            return
+        }
         if !candidate.pinyinPath.isEmpty {
             engine.commitLearning(word: candidate.word, pinyin: candidate.pinyinPath)
         }
@@ -507,7 +513,8 @@ final class MyIMEInputController: IMKInputController {
                 word: traditionalConverter.convert(candidate.word),
                 pinyinPath: candidate.pinyinPath,
                 score: candidate.score,
-                consumedLength: candidate.consumedLength
+                consumedLength: candidate.consumedLength,
+                gloss: candidate.gloss
             )
         }
     }

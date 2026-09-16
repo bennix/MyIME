@@ -6,13 +6,15 @@ public struct Candidate: Hashable, Sendable {
     public let pinyinPath: [String]
     public let score: Double
     public let consumedLength: Int
+    public let gloss: String?
 
-    public init(id: Int64, word: String, pinyinPath: [String], score: Double, consumedLength: Int) {
+    public init(id: Int64, word: String, pinyinPath: [String], score: Double, consumedLength: Int, gloss: String? = nil) {
         self.id = id
         self.word = word
         self.pinyinPath = pinyinPath
         self.score = score
         self.consumedLength = consumedLength
+        self.gloss = gloss
     }
 }
 
@@ -69,6 +71,7 @@ public struct EnginePrefs: Codable, Equatable, Sendable {
     public var followsSystemAppearance = true
     public var orientation = CandidateOrientation.horizontal
     public var outputTraditional = false
+    public var showEnglishGloss = true
     public var frequencyWeight = 1.0
     public var userWeight = 0.35
     public var lengthWeight = 0.12
@@ -77,6 +80,31 @@ public struct EnginePrefs: Codable, Equatable, Sendable {
     public var partialPenalty = 0.1
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case pageSize, fuzzy, disabledSourceMask, fontSize, followsSystemAppearance
+        case orientation, outputTraditional, showEnglishGloss, frequencyWeight
+        case userWeight, lengthWeight, contextWeight, fuzzyPenalty, partialPenalty
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        pageSize = try values.decodeIfPresent(Int.self, forKey: .pageSize) ?? pageSize
+        fuzzy = try values.decodeIfPresent(FuzzyRules.self, forKey: .fuzzy) ?? fuzzy
+        disabledSourceMask = try values.decodeIfPresent(Int.self, forKey: .disabledSourceMask) ?? disabledSourceMask
+        fontSize = try values.decodeIfPresent(Double.self, forKey: .fontSize) ?? fontSize
+        followsSystemAppearance = try values.decodeIfPresent(Bool.self, forKey: .followsSystemAppearance) ?? followsSystemAppearance
+        orientation = try values.decodeIfPresent(CandidateOrientation.self, forKey: .orientation) ?? orientation
+        outputTraditional = try values.decodeIfPresent(Bool.self, forKey: .outputTraditional) ?? outputTraditional
+        showEnglishGloss = try values.decodeIfPresent(Bool.self, forKey: .showEnglishGloss) ?? showEnglishGloss
+        frequencyWeight = try values.decodeIfPresent(Double.self, forKey: .frequencyWeight) ?? frequencyWeight
+        userWeight = try values.decodeIfPresent(Double.self, forKey: .userWeight) ?? userWeight
+        lengthWeight = try values.decodeIfPresent(Double.self, forKey: .lengthWeight) ?? lengthWeight
+        contextWeight = try values.decodeIfPresent(Double.self, forKey: .contextWeight) ?? contextWeight
+        fuzzyPenalty = try values.decodeIfPresent(Double.self, forKey: .fuzzyPenalty) ?? fuzzyPenalty
+        partialPenalty = try values.decodeIfPresent(Double.self, forKey: .partialPenalty) ?? partialPenalty
+    }
 }
 
 public enum PreferencesStore {

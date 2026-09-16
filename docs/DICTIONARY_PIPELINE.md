@@ -1,5 +1,11 @@
 # 词库综合流水线（DICTIONARY_PIPELINE v1.0）
 
+## 当前实现补充（2026-09-16）
+
+Schema 5 新增 `gloss_en(word, gloss)` 与 `english_gloss_count` 元数据。青简来源使用 bit14（16384），固定版本及 SHA-256 见 `tools/SOURCES.lock`。保留源读音，以对数频次映射权重后合并去重；英文释义只保留最终词库包含的词。
+
+完整重建运行 `sh tools/build_dict.sh`。原始 Brightmart 语料不在本地时，可明确使用 `REUSE_LANGUAGE_MODEL=1 sh tools/build_dict.sh`，复用 `build/dictionary/` 中已有的三个统计模型 TSV；缺少任意模型会报错。本轮词库采用此模式，没有重新训练原始语料，也没有引入 Transformer 权重。
+
 > 目标：把已授权的异构来源归一为 **CIF**，合并去重、频率归一，编译为 `system.sqlite`（Schema 见 `SPEC.md` §6.1）。
 > 产物路径：`MyIME/MyIME/Resources/system.sqlite`。
 > 脚本放 `tools/`，用 **Python 3.11+**（`pypinyin`、`OpenCC`、`sqlite3` 标准库）。脚本 MUST 幂等、可重跑。

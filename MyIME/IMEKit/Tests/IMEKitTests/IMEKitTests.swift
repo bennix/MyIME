@@ -69,6 +69,44 @@ private struct PredictingStore: CandidateLookup {
 }
 
 @Suite("Engine") struct EngineTests {
+    @Test func previousPreferencesSurviveUpgrade() throws {
+        var original = EnginePrefs()
+        original.pageSize = 9
+        original.disabledSourceMask = 1024
+        original.outputTraditional = true
+        let encoded = try JSONEncoder().encode(original)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "showEnglishGloss")
+        let restored = try JSONDecoder().decode(EnginePrefs.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(restored == original)
+        original.showEnglishGloss = false
+        #expect(try JSONDecoder().decode(EnginePrefs.self, from: JSONEncoder().encode(original)) == original)
+    }
+
+    @Test func calendarShortcutsStayBehindTheLocalFirstChoice() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let date = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 16, hour: 19, minute: 6, second: 23
+        )))
+        #expect(ShortcutProvider.shortcutWords(for: "rq", date: date, calendar: calendar) == [
+            "2026年9月16日", "2026-09-16", "2026/09/16",
+        ])
+        #expect(ShortcutProvider.shortcutWords(for: "sj", date: date, calendar: calendar) == [
+            "19:06", "19:06:23", "19点06分",
+        ])
+        #expect(ShortcutProvider.shortcutWords(for: "xq", date: date, calendar: calendar) == ["星期三", "周三"])
+        #expect(ShortcutProvider.shortcutWords(for: "rqi", date: date, calendar: calendar).isEmpty)
+        let local = (0..<12).map {
+            Candidate(id: Int64($0), word: "常规\($0)", pinyinPath: ["rq"], score: 1, consumedLength: 2)
+        }
+        let merged = ShortcutProvider.addingShortcuts(to: local, for: "rq", date: date, calendar: calendar, limit: 10)
+        #expect(merged.count == 10)
+        #expect(merged[0] == local[0])
+        #expect(merged[1].word == "2026年9月16日")
+        #expect(merged[2] == local[1])
+    }
+
     @Test func traditionalConversionPrefersWholePhrases() {
         let converter = TraditionalConverter(mappings: [
             "头发": "頭髮",
@@ -278,8 +316,17 @@ private struct PredictingStore: CandidateLookup {
             ?? packageDirectory.appending(path: "../MyIME/Resources/system.sqlite").standardizedFileURL.path
         let bundledStore = try #require(SQLiteStore(path: databasePath))
         #expect(bundledStore.traditionalConverter.isAvailable)
+        #expect(bundledStore.metadata["schema_version"] == "5")
+        #expect(bundledStore.gloss(for: "医院") != nil)
         #expect(bundledStore.traditionalConverter.convert("头发后台开发") == "頭髮後臺開發")
         let engine = Engine(store: bundledStore)
+        #expect(engine.update("yiyuan", prefs: EnginePrefs()).candidates.first { $0.word == "医院" }?.gloss != nil)
+        var noGloss = EnginePrefs()
+        noGloss.showEnglishGloss = false
+        #expect(engine.update("yiyuan", prefs: noGloss).candidates.allSatisfy { $0.gloss == nil })
+        let shortcutOutput = engine.update("rq", prefs: EnginePrefs())
+        let shortcutIndex = try #require(shortcutOutput.candidates.firstIndex { $0.pinyinPath.isEmpty })
+        #expect(engine.select(shortcutIndex, from: shortcutOutput).remainingRaw.isEmpty)
         let weather = engine.update("jintiantianqihenhao", prefs: EnginePrefs())
         let dinner = engine.update("womenmingtianyiqichifan", prefs: EnginePrefs())
         let colloquial = engine.update("aisinile", prefs: EnginePrefs())

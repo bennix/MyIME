@@ -28,6 +28,7 @@ struct SettingsView: View {
                 ForEach(3...9, id: \.self) { Text("\($0)").tag($0) }
             }
             Toggle("输出繁体（繁简共享 MyIME 词库）", isOn: $preferences.outputTraditional)
+            Toggle("候选旁显示英文释义（完全离线）", isOn: $preferences.showEnglishGloss)
             LabeledContent("默认上屏键", value: "空格")
             LabeledContent("默认翻页键", value: "- / = 或 , / .")
             LabeledContent("中英文切换", value: "单击 Shift")
@@ -80,6 +81,7 @@ struct SettingsView: View {
                 unavailableSource("专业词库（等待再分发授权）")
                 sourceToggle("搜狗分类整理", bit: 5)
                 sourceToggle("清华开放中文词库（THUOCL）", bit: 10)
+                sourceToggle("青简词库与语料短语", bit: 14)
                 unavailableSource("程序员术语（等待再分发授权）")
                 Button("校验并替换 system.sqlite…", action: replaceDictionary)
             }

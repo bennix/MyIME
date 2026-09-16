@@ -16,6 +16,7 @@ THUOCL_COMMIT=a30ce79d895d01ab5132a5c74c29703ff7efb4cc
 SEMANTIC_KB_COMMIT=2379ce44aee1a6aa696521efa4ae653df6dab0b9
 SC_DICTIONARY_COMMIT=e057977284ed40f15765d3b97808e34fae98480e
 XINHUA_COMMIT=fe6d6c2e8baa82187f4c96bbe042e43f96c05666
+QINGJIAN_COMMIT=95511c16f5ae73c929865a57cd0e1a4f99c4066e
 ZHWIKI="$BUILD_DIR/zhwiki-20260416.dict.yaml"
 OPENCC_COMMIT=81223ed87ae53283ef518e2deac34b7971f8a39e
 OPENCC_PHRASES="$BUILD_DIR/opencc-STPhrases.txt"
@@ -89,6 +90,13 @@ if [ ! -d "$BUILD_DIR/chinese-xinhua/.git" ]; then
   git clone --quiet https://github.com/pwxcoo/chinese-xinhua.git "$BUILD_DIR/chinese-xinhua"
 fi
 git -C "$BUILD_DIR/chinese-xinhua" checkout --quiet "$XINHUA_COMMIT"
+if [ ! -d "$BUILD_DIR/qingjian/.git" ]; then
+  git clone --quiet https://github.com/qingjian-team/qingjian.git "$BUILD_DIR/qingjian"
+fi
+git -C "$BUILD_DIR/qingjian" fetch --quiet origin "$QINGJIAN_COMMIT"
+git -C "$BUILD_DIR/qingjian" checkout --quiet "$QINGJIAN_COMMIT"
+echo "7787d6d219674dd51297652456c55ea2d49a65b5e571d2309a62add0ec2d2279  $BUILD_DIR/qingjian/assets/lexicon/dict.tsv" | shasum -a 256 -c
+echo "7b9676979aa227bde7a2d541354a59b73a04f33acd36ef5d6c433ce789b81625  $BUILD_DIR/qingjian/assets/glossary/glossary-en.tsv" | shasum -a 256 -c
 echo "d722c784cab3b3b346d09672aab46533f95e0e0c163d6040854ef76ca8e9504a  $CEDICT" | shasum -a 256 -c
 echo "7197c3211ddd98962b036cdf40324d1ea2bfaa12bd028e68faa70111a88e12a8  $JIEBA" | shasum -a 256 -c
 echo "0f21c76937ac42973dba4d8d26cfb80f03e0da0069af01ad2496fc5cfc9bb36d  $BUILD_DIR/rime-ice-base.dict.yaml" | shasum -a 256 -c
@@ -110,9 +118,16 @@ MERGED="$BUILD_DIR/merged.tsv"
   --sc-dictionary "$BUILD_DIR/sc-dictionary/main.txt" \
   --xinhua-dir "$BUILD_DIR/chinese-xinhua/data" \
   --semantic-kb-dir "$BUILD_DIR/ChineseSemanticKB/dict" \
+  --qingjian-dict "$BUILD_DIR/qingjian/assets/lexicon/dict.tsv" \
   --opencc-ts-phrases "$OPENCC_TS_PHRASES" \
   --opencc-ts-characters "$OPENCC_TS_CHARACTERS"
 CORPUS_DIR="$ROOT_DIR/build/sources/brightmart"
+if [ "${REUSE_LANGUAGE_MODEL:-0}" = "1" ]; then
+  for model in language_model word_unigram word_bigram; do
+    test -s "$BUILD_DIR/$model.tsv" || { echo "Missing cached model: $model.tsv" >&2; exit 1; }
+  done
+  echo "Reusing existing local statistical language models (REUSE_LANGUAGE_MODEL=1)"
+else
 "$PYTHON_BIN" "$SCRIPT_DIR/build_language_model.py" \
   "$MERGED" "$BUILD_DIR/language_model.tsv" \
   --unigram-output "$BUILD_DIR/word_unigram.tsv" \
@@ -121,11 +136,13 @@ CORPUS_DIR="$ROOT_DIR/build/sources/brightmart"
     "$CORPUS_DIR/news2016zh.sample.part" \
     "2:$CORPUS_DIR/baike2018qa.sample.part" \
     "2:$CORPUS_DIR/webtext2019zh.sample.part"
+fi
 "$PYTHON_BIN" "$SCRIPT_DIR/compile.py" \
   "$MERGED" \
   "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite" \
   --language-model "$BUILD_DIR/language_model.tsv" \
   --unigram-model "$BUILD_DIR/word_unigram.tsv" \
   --bigram-model "$BUILD_DIR/word_bigram.tsv" \
+  --gloss-en "$BUILD_DIR/qingjian/assets/glossary/glossary-en.tsv" \
   --opencc "$OPENCC_PHRASES" "$OPENCC_CHARACTERS"
 "$PYTHON_BIN" "$SCRIPT_DIR/verify.py" "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite"

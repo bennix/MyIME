@@ -7,6 +7,9 @@ database = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
 manifest = json.loads(database.execute("SELECT value FROM meta WHERE key='source_manifest'").fetchone()[0])
 manifest_sources = {source["id"] for source in manifest["sources"] if source["kept"] > 0}
 checks = {
+    "qingjian": "qingjian" in manifest_sources,
+    "english_glosses": database.execute("SELECT count(*) FROM gloss_en").fetchone()[0] > 50_000,
+    "hospital_gloss": database.execute("SELECT 1 FROM gloss_en WHERE word='医院' AND length(gloss)>0").fetchone() is not None,
     "integrity": database.execute("PRAGMA integrity_check").fetchone()[0] == "ok",
     "schema": {"meta", "entries", "language_ngram", "word_unigram", "word_bigram", "traditional_map"}.issubset({row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}),
     "language_model": database.execute("SELECT count(*) FROM language_ngram").fetchone()[0] >= 200_000,

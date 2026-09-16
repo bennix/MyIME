@@ -41,6 +41,10 @@ CREATE TABLE traditional_map(
   simplified TEXT PRIMARY KEY,
   traditional TEXT NOT NULL
 );
+CREATE TABLE gloss_en(
+  word TEXT PRIMARY KEY,
+  gloss TEXT NOT NULL
+);
 """
 
 SOURCES = (
@@ -55,6 +59,7 @@ SOURCES = (
     ("sc_dictionary", 2048, "CC-BY-3.0"),
     ("chinese_xinhua", 4096, "MIT"),
     ("chinese_semantic_kb", 8192, "upstream-no-SPDX-author-attribution"),
+    ("qingjian", 16384, "GPL-3.0-or-later-and-upstream-data-terms"),
 )
 
 
@@ -106,6 +111,21 @@ def load_score_tsv(path: Path | None, columns: int) -> list[tuple]:
     return rows
 
 
+def load_glosses(path: Path | None, words: set[str]) -> list[tuple[str, str]]:
+    if path is None or not path.exists():
+        return []
+    rows: dict[str, str] = {}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) < 2 or not fields[0] or not fields[1]:
+            raise ValueError(f"{path}:{number}: expected word and gloss")
+        if fields[0] in words:
+            rows.setdefault(fields[0], " · ".join(fields[1:3]))
+    return sorted(rows.items())
+
+
 def recalibrate_weights(
     rows: list[tuple[str, str, str, str, int, int]],
     unigrams: list[tuple[str, float]],
@@ -136,6 +156,7 @@ def compile_database(
     unigram_model: Path | None = None,
     bigram_model: Path | None = None,
     opencc_paths: list[Path] | None = None,
+    gloss_en: Path | None = None,
 ) -> None:
     rows = load(source)
     traditional_rows = load_opencc(opencc_paths or [])
@@ -145,6 +166,7 @@ def compile_database(
     unigram_rows = load_score_tsv(unigram_model, 2)
     bigram_rows = load_score_tsv(bigram_model, 3)
     rows = recalibrate_weights(rows, unigram_rows)
+    gloss_rows = load_glosses(gloss_en, {row[0] for row in rows})
     digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
     built_at = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
@@ -163,6 +185,7 @@ def compile_database(
         connection.executemany("INSERT INTO word_unigram VALUES(?,?)", unigram_rows)
         connection.executemany("INSERT INTO word_bigram VALUES(?,?,?)", bigram_rows)
         connection.executemany("INSERT INTO traditional_map VALUES(?,?)", traditional_rows)
+        connection.executemany("INSERT INTO gloss_en VALUES(?,?)", gloss_rows)
         manifest = {"sources": [
             {
                 "id": source_id,
@@ -172,13 +195,14 @@ def compile_database(
             for source_id, source_mask, license_name in SOURCES
         ]}
         connection.executemany("INSERT INTO meta VALUES(?,?)", [
-            ("schema_version", "4"), ("build_hash", digest),
+            ("schema_version", "5"), ("build_hash", digest),
             ("source_manifest", json.dumps(manifest, ensure_ascii=False, sort_keys=True)),
             ("entry_count", str(len(rows))),
             ("language_ngram_count", str(len(language_rows))),
             ("word_unigram_count", str(len(unigram_rows))),
             ("word_bigram_count", str(len(bigram_rows))),
             ("traditional_mapping_count", str(len(traditional_rows))),
+            ("english_gloss_count", str(len(gloss_rows))),
             ("built_at", built_at),
         ])
         connection.commit()
@@ -201,6 +225,7 @@ if __name__ == "__main__":
     parser.add_argument("--unigram-model", type=Path)
     parser.add_argument("--bigram-model", type=Path)
     parser.add_argument("--opencc", type=Path, nargs="*", default=[])
+    parser.add_argument("--gloss-en", type=Path)
     arguments = parser.parse_args()
     compile_database(
         arguments.input,
@@ -209,4 +234,5 @@ if __name__ == "__main__":
         arguments.unigram_model,
         arguments.bigram_model,
         arguments.opencc,
+        arguments.gloss_en,
     )

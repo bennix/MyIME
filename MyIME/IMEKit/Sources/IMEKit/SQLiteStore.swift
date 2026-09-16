@@ -25,6 +25,7 @@ public protocol CandidateLookup: Sendable {
     func bigramBoost(previous: String?, word: String) -> Double
     func sequenceBoost(prefix: String, word: String) -> Double
     func predictNext(after previous: String, limit: Int) -> [StoreEntry]
+    func gloss(for word: String) -> String?
 }
 
 public extension CandidateLookup {
@@ -36,6 +37,7 @@ public extension CandidateLookup {
     func unigramBoost(word: String) -> Double { 0 }
     func sequenceBoost(prefix: String, word: String) -> Double { 0 }
     func predictNext(after previous: String, limit: Int) -> [StoreEntry] { [] }
+    func gloss(for word: String) -> String? { nil }
 }
 
 public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
@@ -45,6 +47,7 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
     private var wordUnigrams: [UInt64: Float] = [:]
     private var wordBigrams: [UInt64: Float] = [:]
     private var predictions: [UInt64: [StoreEntry]] = [:]
+    private var englishGlosses: [UInt64: String] = [:]
     private var exactLookupCache: [String: [StoreEntry]] = [:]
     public let metadata: [String: String]
     public let traditionalConverter: TraditionalConverter
@@ -59,7 +62,7 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
         database = handle
         sqlite3_exec(handle, "PRAGMA query_only=ON; PRAGMA busy_timeout=100;", nil, nil, nil)
         metadata = Self.readMetadata(handle)
-        guard ["1", "2", "3", "4"].contains(metadata["schema_version"]) else {
+        guard ["1", "2", "3", "4", "5"].contains(metadata["schema_version"]) else {
             sqlite3_close(handle)
             database = nil
             return nil
@@ -69,6 +72,7 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
         wordUnigrams = wordModel.unigrams
         wordBigrams = wordModel.bigrams
         predictions = wordModel.predictions
+        englishGlosses = Self.readEnglishGlosses(handle)
         traditionalConverter = Self.readTraditionalConverter(handle)
     }
 
@@ -188,6 +192,10 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
         return score
     }
 
+    public func gloss(for word: String) -> String? {
+        englishGlosses[Self.stableHash(word)]
+    }
+
     private static func stableHash(_ value: String) -> UInt64 {
         var hash: UInt64 = 14_695_981_039_346_656_037
         for byte in value.utf8 {
@@ -271,6 +279,21 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
               let key = sqlite3_column_text(statement, 0),
               let value = sqlite3_column_text(statement, 1) {
             result[String(cString: key)] = String(cString: value)
+        }
+        return result
+    }
+
+    private static func readEnglishGlosses(_ database: OpaquePointer) -> [UInt64: String] {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(database, "SELECT word,gloss FROM gloss_en", -1, &statement, nil) == SQLITE_OK else {
+            return [:]
+        }
+        var result: [UInt64: String] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW,
+              let word = sqlite3_column_text(statement, 0),
+              let gloss = sqlite3_column_text(statement, 1) {
+            result[stableHash(String(cString: word))] = String(cString: gloss)
         }
         return result
     }

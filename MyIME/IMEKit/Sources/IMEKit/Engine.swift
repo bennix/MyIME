@@ -112,11 +112,26 @@ public final class Engine: IMEEngine, @unchecked Sendable {
             if $0.word != $1.word { return $0.word < $1.word }
             return $0.id < $1.id
         }
-        let candidatesWithEmoji = EmojiProvider.shared.addingEmojiCandidates(to: candidates, limit: 100)
+        let annotatedCandidates = candidates.map { candidate in
+            Candidate(
+                id: candidate.id,
+                word: candidate.word,
+                pinyinPath: candidate.pinyinPath,
+                score: candidate.score,
+                consumedLength: candidate.consumedLength,
+                gloss: prefs.showEnglishGloss ? store.gloss(for: candidate.word) : nil
+            )
+        }
+        let candidatesWithShortcuts = ShortcutProvider.addingShortcuts(
+            to: annotatedCandidates,
+            for: normalized,
+            limit: 101
+        )
+        let candidatesWithEmoji = EmojiProvider.shared.addingEmojiCandidates(to: candidatesWithShortcuts, limit: 101)
         return EngineOutput(
             preedit: firstPath.preedit,
-            candidates: candidatesWithEmoji,
-            hasMore: candidates.count > 100,
+            candidates: Array(candidatesWithEmoji.prefix(100)),
+            hasMore: candidatesWithEmoji.count > 100,
             raw: normalized
         )
     }

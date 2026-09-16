@@ -64,6 +64,16 @@ commit=2379ce44aee1a6aa696521efa4ae653df6dab0b9
 license=upstream-no-SPDX-author-attribution
 artifacts=dict/同义关系库.txt,dict/反义关系库.txt,dict/简称关系库.txt,dict/抽象关系库.txt
 
+[qingjian]
+url=https://github.com/qingjian-team/qingjian
+commit=95511c16f5ae73c929865a57cd0e1a4f99c4066e
+license=GPL-3.0-or-later-and-upstream-data-terms
+dict_artifact=assets/lexicon/dict.tsv
+dict_sha256=7787d6d219674dd51297652456c55ea2d49a65b5e571d2309a62add0ec2d2279
+gloss_artifact=assets/glossary/glossary-en.tsv
+gloss_sha256=7b9676979aa227bde7a2d541354a59b73a04f33acd36ef5d6c433ce789b81625
+usage=normalized-word-readings-corpus-frequencies-and-offline-English-glosses
+
 [nlp-chinese-corpus]
 url=https://github.com/brightmart/nlp_chinese_corpus
 commit=5dc872154777d24c897f957f1ec848fc7fd59aa9
