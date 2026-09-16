@@ -145,5 +145,6 @@ fi
   --bigram-model "$BUILD_DIR/word_bigram.tsv" \
   --gloss-en "$BUILD_DIR/qingjian/assets/glossary/glossary-en.tsv" \
   --opencc "$OPENCC_PHRASES" "$OPENCC_CHARACTERS"
-"$PYTHON_BIN" "$SCRIPT_DIR/enrich_glosses.py" "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite" "$CEDICT"
+"$PYTHON_BIN" "$SCRIPT_DIR/enrich_glosses.py" "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite" "$CEDICT" \
+  --preferred "$BUILD_DIR/qingjian/assets/glossary/glossary-en.tsv"
 "$PYTHON_BIN" "$SCRIPT_DIR/verify.py" "$ROOT_DIR/MyIME/MyIME/Resources/system.sqlite"
