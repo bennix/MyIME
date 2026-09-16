@@ -8,6 +8,16 @@ public struct Candidate: Hashable, Sendable {
     public let consumedLength: Int
     public let gloss: String?
 
+    /// Strip dictionary part-of-speech labels without changing the source gloss.
+    public var displayGloss: String? {
+        guard let gloss else { return nil }
+        let text = gloss.replacingOccurrences(
+            of: #"(?i)(^|[;；/|·]\s*)\s*(?:(?:adj|adv|pron|prep|conj|interj|int|aux|num|art|det|phr|part|abbr|vt|vi|n|v|m)\.(?:\s*/\s*(?:vt|vi|n|v)\.)?\s*)+"#,
+            with: "$1", options: .regularExpression
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     public init(id: Int64, word: String, pinyinPath: [String], score: Double, consumedLength: Int, gloss: String? = nil) {
         self.id = id
         self.word = word
@@ -72,6 +82,8 @@ public struct EnginePrefs: Codable, Equatable, Sendable {
     public var orientation = CandidateOrientation.horizontal
     public var outputTraditional = false
     public var showEnglishGloss = true
+    public var chineseTextColor: UInt32 = 0x2057A6
+    public var englishTextColor: UInt32 = 0xA34D16
     public var frequencyWeight = 1.0
     public var userWeight = 0.35
     public var lengthWeight = 0.12
@@ -85,6 +97,7 @@ public struct EnginePrefs: Codable, Equatable, Sendable {
         case pageSize, fuzzy, disabledSourceMask, fontSize, followsSystemAppearance
         case orientation, outputTraditional, showEnglishGloss, frequencyWeight
         case userWeight, lengthWeight, contextWeight, fuzzyPenalty, partialPenalty
+        case chineseTextColor, englishTextColor
     }
 
     public init(from decoder: Decoder) throws {
@@ -98,6 +111,8 @@ public struct EnginePrefs: Codable, Equatable, Sendable {
         orientation = try values.decodeIfPresent(CandidateOrientation.self, forKey: .orientation) ?? orientation
         outputTraditional = try values.decodeIfPresent(Bool.self, forKey: .outputTraditional) ?? outputTraditional
         showEnglishGloss = try values.decodeIfPresent(Bool.self, forKey: .showEnglishGloss) ?? showEnglishGloss
+        chineseTextColor = try values.decodeIfPresent(UInt32.self, forKey: .chineseTextColor) ?? chineseTextColor
+        englishTextColor = try values.decodeIfPresent(UInt32.self, forKey: .englishTextColor) ?? englishTextColor
         frequencyWeight = try values.decodeIfPresent(Double.self, forKey: .frequencyWeight) ?? frequencyWeight
         userWeight = try values.decodeIfPresent(Double.self, forKey: .userWeight) ?? userWeight
         lengthWeight = try values.decodeIfPresent(Double.self, forKey: .lengthWeight) ?? lengthWeight

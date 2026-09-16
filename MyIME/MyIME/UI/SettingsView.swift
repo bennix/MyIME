@@ -28,7 +28,7 @@ struct SettingsView: View {
                 ForEach(3...9, id: \.self) { Text("\($0)").tag($0) }
             }
             Toggle("输出繁体（繁简共享 MyIME 词库）", isOn: $preferences.outputTraditional)
-            Toggle("候选旁显示英文释义（完全离线）", isOn: $preferences.showEnglishGloss)
+            Toggle("候选上方显示英文释义（完全离线）", isOn: $preferences.showEnglishGloss)
             LabeledContent("默认上屏键", value: "空格")
             LabeledContent("默认翻页键", value: "- / = 或 , / .")
             LabeledContent("中英文切换", value: "单击 Shift")
@@ -57,6 +57,8 @@ struct SettingsView: View {
         Form {
             Slider(value: $preferences.fontSize, in: 13...28, step: 1) { Text("候选字号") }
             LabeledContent("字号", value: "\(Int(preferences.fontSize)) pt")
+            ColorPicker("中文词语颜色", selection: candidateColor(\.chineseTextColor), supportsOpacity: false)
+            ColorPicker("英文单词与释义颜色", selection: candidateColor(\.englishTextColor), supportsOpacity: false)
             Toggle("跟随系统深浅色", isOn: $preferences.followsSystemAppearance)
             Picker("候选排列", selection: $preferences.orientation) {
                 Text("横向").tag(CandidateOrientation.horizontal)
@@ -65,6 +67,14 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
         }
         .formStyle(.grouped)
+    }
+
+    private func candidateColor(_ key: WritableKeyPath<EnginePrefs, UInt32>) -> Binding<Color> {
+        Binding(get: { Color(candidateRGB: preferences[keyPath: key]) }, set: { color in
+            guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
+            func byte(_ value: CGFloat) -> UInt32 { UInt32((min(1, max(0, value)) * 255).rounded()) }
+            preferences[keyPath: key] = (byte(rgb.redComponent) << 16) | (byte(rgb.greenComponent) << 8) | byte(rgb.blueComponent)
+        })
     }
 
     private var dictionaries: some View {

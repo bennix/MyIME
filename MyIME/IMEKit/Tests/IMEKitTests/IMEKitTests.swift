@@ -77,10 +77,29 @@ private struct PredictingStore: CandidateLookup {
         let encoded = try JSONEncoder().encode(original)
         var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         object.removeValue(forKey: "showEnglishGloss")
+        object.removeValue(forKey: "chineseTextColor")
+        object.removeValue(forKey: "englishTextColor")
         let restored = try JSONDecoder().decode(EnginePrefs.self, from: JSONSerialization.data(withJSONObject: object))
         #expect(restored == original)
         original.showEnglishGloss = false
+        original.chineseTextColor = 0x123456
+        original.englishTextColor = 0xABCDEF
         #expect(try JSONDecoder().decode(EnginePrefs.self, from: JSONEncoder().encode(original)) == original)
+    }
+
+    @Test func candidateGlossOmitsPartOfSpeech() {
+        for (source, expected) in [("n. town", "town"), ("adj. beautiful", "beautiful"),
+                                   ("v. run; n. race", "run; race"), ("vt./vi. study", "study"),
+                                   ("phr. this is", "this is"), ("phr. this matter", "this matter"),
+                                   ("phr. this is a", "this is a"), ("phr. this is my", "this is my"),
+                                   ("int. hello", "hello"), ("part. of", "of"),
+                                   ("n. town · phr. small town", "town · small town"),
+                                   ("New York", "New York"), ("a town", "a town"),
+                                   ("Dr. Smith", "Dr. Smith"), ("lit. red heart", "lit. red heart")] {
+            let candidate = Candidate(id: 1, word: "词", pinyinPath: [], score: 0, consumedLength: 1, gloss: source)
+            #expect(candidate.displayGloss == expected)
+            #expect(candidate.gloss == source)
+        }
     }
 
     @Test func calendarShortcutsStayBehindTheLocalFirstChoice() throws {

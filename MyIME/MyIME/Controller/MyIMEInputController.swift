@@ -7,6 +7,7 @@ import os
 @objc(MyIMEInputController)
 final class MyIMEInputController: IMKInputController {
     private static weak var activatedController: MyIMEInputController?
+    private static let liveControllers = NSHashTable<MyIMEInputController>.weakObjects()
     private let engine = IMEEnvironment.shared.engine
     private let traditionalConverter = IMEEnvironment.shared.systemStore?.traditionalConverter ?? .empty
     private let candidateWindow = CandidateWindowController()
@@ -32,6 +33,7 @@ final class MyIMEInputController: IMKInputController {
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
+        Self.liveControllers.add(self)
         candidateWindow.onExpand = { [weak self] in
             _ = self?.moveDown()
         }
@@ -99,6 +101,10 @@ final class MyIMEInputController: IMKInputController {
 
     override func inputText(_ string: String!, client sender: Any!) -> Bool {
         logInputPath("text-only")
+        if string == "\u{1b}", let client = textClient(from: sender) {
+            reset(client)
+            return true
+        }
         guard let string, !string.isEmpty, !englishMode,
               let client = textClient(from: sender) else { return false }
         activeClient = client
@@ -127,7 +133,7 @@ final class MyIMEInputController: IMKInputController {
     override func didCommand(by selector: Selector!, client sender: Any!) -> Bool {
         guard let selector else { return false }
         let keyCodes: [String: Int] = [
-            "deleteBackward:": 51, "cancelOperation:": 53,
+            "deleteBackward:": 51, "cancelOperation:": 53, "cancel:": 53,
             "insertNewline:": 36, "insertLineBreak:": 36,
             "moveLeft:": 123, "moveRight:": 124, "moveDown:": 125, "moveUp:": 126,
             "pageUp:": 116, "pageDown:": 121,
@@ -165,6 +171,13 @@ final class MyIMEInputController: IMKInputController {
     }
 
     static func finalizeStrandedCompositionIfNeeded() {
+        if !SelfInstaller.isCurrentInputSource {
+            // Text-data clients may never call activateServer. Hide every live
+            // session, including those not tracked as the activated controller.
+            for controller in liveControllers.allObjects {
+                controller.hidePalettes()
+            }
+        }
         guard !SelfInstaller.isCurrentInputSource,
               let controller = activatedController else { return }
         if let client = controller.activeClient {
@@ -223,9 +236,9 @@ final class MyIMEInputController: IMKInputController {
             commitHighlighted(client)
             return true
         case 36, 76: // Return / keypad enter
+            defer { clearSuggestions(); inputModeIndicator.hide() }
             if raw.isEmpty {
-                if showingSuggestions, !output.candidates.isEmpty {
-                    commitSuggestion(highlighted, client: client)
+                if showingSuggestions {
                     return true
                 }
                 return false
@@ -248,15 +261,9 @@ final class MyIMEInputController: IMKInputController {
             refresh(client)
             return true
         case 53: // Escape
-            if raw.isEmpty {
-                if showingSuggestions {
-                    clearSuggestions()
-                    return true
-                }
-                return false
-            }
+            let hadCandidates = !raw.isEmpty || showingSuggestions || !composedPhrase.isEmpty
             reset(client)
-            return true
+            return hadCandidates
         case 123: // Left
             return moveHighlight(-1)
         case 124: // Right
@@ -415,6 +422,7 @@ final class MyIMEInputController: IMKInputController {
     }
 
     private func showSuggestions(_ client: IMKTextInput) {
+        inputModeIndicator.hide()
         let prefs = PreferencesStore.load()
         let suggestions = engine.suggestions(limit: max(36, prefs.pageSize))
         guard !suggestions.isEmpty else {
@@ -488,13 +496,14 @@ final class MyIMEInputController: IMKInputController {
             refreshCandidateWindowPosition()
             return true
         }
-        return moveHighlight(6)
+        return moveHighlight(candidateWindow.verticalLayout ? 1 : 6)
     }
 
     private func moveUp() -> Bool {
         guard !raw.isEmpty || showingSuggestions else { return false }
         guard expandedCandidates else { return false }
-        return highlighted >= 6 ? moveHighlight(-6) : true
+        let step = candidateWindow.verticalLayout ? 1 : 6
+        return highlighted >= step ? moveHighlight(-step) : true
     }
 
     private func collapseCandidates() {
@@ -607,4 +616,3 @@ final class MyIMEInputController: IMKInputController {
         }
     }
 }
-

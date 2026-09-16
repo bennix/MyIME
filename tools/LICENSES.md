@@ -6,6 +6,10 @@ frequency values, and compiles the result into SQLite.
 
 ## CC-CEDICT
 
+English candidate annotations also use exact simplified headwords from this source.
+The enrichment removes cross-references, classifier labels and parenthetical notes;
+it does not translate unlisted phrases by concatenating definitions.
+
 - Publisher: MDBG
 - Source: https://www.mdbg.net/chinese/dictionary?page=cc-cedict
 - Artifact date: 2026-08-07T08:04:28Z

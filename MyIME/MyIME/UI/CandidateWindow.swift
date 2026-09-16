@@ -3,11 +3,21 @@ import InputMethodKit
 import SwiftUI
 import IMEKit
 
+extension Color {
+    init(candidateRGB value: UInt32) {
+        self.init(.sRGB, red: Double((value >> 16) & 255) / 255,
+                  green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
+    }
+}
+
 private struct CandidateListView: View {
     let candidates: [Candidate]
     let highlighted: Int
     let prefs: EnginePrefs
     let expanded: Bool
+    let vertical: Bool
+    let availableWidth: CGFloat
+    let availableHeight: CGFloat
     let onSelect: (Int) -> Void
     let onExpand: () -> Void
     let onCollapse: () -> Void
@@ -16,7 +26,17 @@ private struct CandidateListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if expanded {
+            if vertical {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) { candidateViews }
+                    }
+                    .frame(width: availableWidth, height: min(availableHeight, CGFloat(candidates.count) * (prefs.fontSize * 3 + 18)))
+                    .onAppear { proxy.scrollTo(highlighted, anchor: .center) }
+                    .onChange(of: highlighted) { value in proxy.scrollTo(value, anchor: .center) }
+                }
+                controlButton(expanded ? "chevron.up" : "chevron.down", label: expanded ? "收起候选" : "展开候选", action: expanded ? onCollapse : onExpand)
+            } else if expanded {
                 HStack(spacing: 4) {
                     LazyVGrid(columns: gridColumns, spacing: 0) {
                         candidateViews
@@ -52,23 +72,26 @@ private struct CandidateListView: View {
     @ViewBuilder private var candidateViews: some View {
         ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
             Button { onSelect(index) } label: {
-                HStack(spacing: 7) {
-                    Text(candidateTitle(candidate.word, at: index))
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                    if prefs.showEnglishGloss, let gloss = candidate.gloss, !gloss.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    if prefs.showEnglishGloss, let gloss = candidate.displayGloss {
                         Text(gloss)
                             .font(.system(size: max(11, prefs.fontSize - 5)))
-                            .foregroundStyle(index == highlighted ? Color.white.opacity(0.78) : Color.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: expanded ? 110 : 90, alignment: .leading)
+                            .foregroundStyle(Color(candidateRGB: prefs.englishTextColor))
+                            .lineLimit(vertical ? nil : 1)
+                            .fixedSize(horizontal: !vertical, vertical: true)
                     }
+                    Text(candidateTitle(candidate.word, at: index))
+                        .foregroundStyle(Color(candidateRGB: candidate.word.unicodeScalars.allSatisfy { $0.isASCII } ? prefs.englishTextColor : prefs.chineseTextColor))
+                        .lineLimit(vertical ? nil : 1)
+                        .fixedSize(horizontal: !vertical, vertical: true)
+                        .layoutPriority(1)
                 }
-                    .frame(maxWidth: expanded ? .infinity : nil, minHeight: expanded ? 28 : 34, alignment: .leading)
+                    .frame(maxWidth: (expanded || vertical) ? .infinity : nil, minHeight: expanded ? 28 : 34, alignment: .leading)
                     .padding(.horizontal, expanded ? 7 : 9)
                     .padding(.vertical, 2)
                     .foregroundStyle(index == highlighted ? Color.white : Color.primary)
-                    .background(index == highlighted ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                    .background(index == highlighted ? Color.accentColor.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(index == highlighted ? Color.accentColor : Color.clear, lineWidth: 1.5))
                     .contentShape(Rectangle())
                     .overlay(alignment: .bottom) {
                         if expanded, index / 6 < (candidates.count - 1) / 6 {
@@ -77,6 +100,7 @@ private struct CandidateListView: View {
                     }
             }
             .buttonStyle(.plain)
+            .id(index)
         }
     }
 
@@ -110,6 +134,9 @@ final class CandidateWindowController {
     private var highlighted = 0
     private var preferences = EnginePrefs()
     private var expanded = false
+    private(set) var verticalLayout = false
+    private var availableWidth: CGFloat = 480
+    private var availableHeight: CGFloat = 360
 
     init() {
         panel = NSPanel(
@@ -129,7 +156,7 @@ final class CandidateWindowController {
     }
 
     func update(candidates: [Candidate], highlighted: Int, prefs: EnginePrefs, expanded: Bool, client: IMKTextInput) {
-        updateCandidates(candidates, highlighted: highlighted, prefs: prefs, expanded: expanded)
+        guard SelfInstaller.isCurrentInputSource else { hide(); return }
         guard !candidates.isEmpty else { hide(); return }
         var lineRect = NSRect.zero
         let selectedLocation = client.selectedRange().location
@@ -139,12 +166,17 @@ final class CandidateWindowController {
         // A caret normally has zero width; it is still a valid text position.
         let hasCaret = lineRect.height > 0 && lineRect.origin.x.isFinite && lineRect.origin.y.isFinite
         let anchor = hasCaret ? lineRect : NSRect(origin: fallback, size: .zero)
-        let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) })
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(anchor.origin) })
             ?? NSScreen.screens.first(where: { $0.frame.contains(fallback) })
             ?? NSScreen.main
         let visibleFrame = screen?.visibleFrame ?? NSRect(origin: .zero, size: panel.frame.size)
-        let belowY = anchor.minY - panel.frame.height - 4
-        let preferredY = belowY >= visibleFrame.minY ? belowY : anchor.maxY + 4
+        let belowSpace = max(0, anchor.minY - visibleFrame.minY - 16)
+        let aboveSpace = max(0, visibleFrame.maxY - anchor.maxY - 16)
+        availableWidth = min(540, max(240, visibleFrame.width - 40))
+        availableHeight = max(60, min(420, max(belowSpace, aboveSpace) - 60))
+        updateCandidates(candidates, highlighted: highlighted, prefs: prefs, expanded: expanded)
+        let belowY = anchor.minY - panel.frame.height - 12
+        let preferredY = panel.frame.height <= belowSpace ? belowY : anchor.maxY + 12
         let origin = NSPoint(
             x: min(max(anchor.minX, visibleFrame.minX), max(visibleFrame.minX, visibleFrame.maxX - panel.frame.width)),
             y: min(max(preferredY, visibleFrame.minY), max(visibleFrame.minY, visibleFrame.maxY - panel.frame.height))
@@ -158,11 +190,20 @@ final class CandidateWindowController {
         self.highlighted = highlighted
         preferences = prefs
         self.expanded = expanded
+        let font = NSFont.systemFont(ofSize: prefs.fontSize)
+        let widths = candidates.map { candidate in
+            max((candidate.word as NSString).size(withAttributes: [.font: font]).width + 44,
+                prefs.showEnglishGloss ? ((candidate.displayGloss ?? "") as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: max(11, prefs.fontSize - 5))]).width + 24 : 0)
+        }
+        verticalLayout = prefs.orientation == .vertical || (expanded ? widths.contains { $0 > 100 } : widths.reduce(40, +) > min(800, availableWidth * 1.5))
         let hosting = NSHostingView(rootView: CandidateListView(
             candidates: candidates,
             highlighted: highlighted,
             prefs: prefs,
             expanded: expanded,
+            vertical: verticalLayout,
+            availableWidth: availableWidth,
+            availableHeight: availableHeight,
             onSelect: { [weak self] in self?.onSelect?($0) },
             onExpand: { [weak self] in self?.onExpand?() },
             onCollapse: { [weak self] in self?.onCollapse?() }
@@ -235,6 +276,10 @@ final class InputModeIndicatorController {
     }
 
     private func present(client: IMKTextInput, generation: Int) {
+        guard displayGeneration == generation, SelfInstaller.isCurrentInputSource else {
+            hide()
+            return
+        }
         var lineRect = NSRect.zero
         let selectedLocation = client.selectedRange().location
         let characterIndex = selectedLocation == NSNotFound ? 0 : selectedLocation
