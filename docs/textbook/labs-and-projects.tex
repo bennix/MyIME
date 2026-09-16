@@ -1,0 +1,280 @@
+\chapter{实验一至四：从 Echo 到候选窗口}
+
+本章给出初级篇的可提交实验。每个实验都要求“源码、测试、观察记录”三件套。只提交能运行的 App 不足以证明理解；只提交报告也不足以证明实现。
+
+\section{从哪个分支开始}
+
+仓库提供 \code{lab1-starter} 至 \code{lab12-starter} 十二个起始分支；分支名表示“开始该实验前的状态”，不表示答案。学生只克隆教师指定的 starter，并从自己的作业分支提交：
+
+\begin{lstlisting}[language=bash,numbers=none]
+git fetch origin --prune
+git switch --create homework/lab1 origin/lab1-starter
+swift test --package-path TeachingStarter
+\end{lstlisting}
+
+\begin{center}
+\small
+\begin{tabular}{p{2.8cm}p{4.2cm}p{5.2cm}}
+\toprule
+Starter & 已提供的边界 & 学生完成的核心 \\
+\midrule
+\code{lab1-starter} & IMK 配置清单与 Echo 接口 & 最小服务器、事件回送 \\
+\code{lab2-starter} & 纯状态机类型与表测框架 & 组合、退格、提交、取消 \\
+\code{lab3-starter} & 小词库协议与 TSV fixture & 候选召回、稳定排序 \\
+\code{lab4-starter} & 候选 ViewModel 与坐标 fixture & 不抢焦点窗口、多屏定位 \\
+\code{lab5-starter} & 音节表和图搜索接口 & 切分图、撇号、简拼与容错 \\
+\code{lab6-starter} & \code{ScoreBreakdown} 数据型 & 分数解释与消融 \\
+\code{lab7-starter} & 小词格 fixture & Beam Search 与完整枚举校验 \\
+\code{lab8-starter} & 临时用户库 schema & 异步学习、清空与故障降级 \\
+\code{lab9-starter} & 客户端测试矩阵模板 & 跨客户端、VoiceOver 回归 \\
+\code{lab10-starter} & 诊断报告字段协议 & 脱敏收集与证据链 \\
+\code{lab11-starter} & 许可证/SBOM 清单模板 & 离线与供应链审计 \\
+\code{lab12-starter} & Release 验收脚本骨架 & 第二台 Mac 安装和恢复 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+完整 MyIME 1.0.10 用于课后对照，不是实验起点。公开仓库中的分支只能避免“误入完整实现”，不能阻止刻意查看 \code{main}；正式评分课程应把对应 starter 导入独立的 GitHub Classroom 私有模板仓库，只向学生开放模板。教师的 solution 分支不要推送到学生可读仓库。
+
+\section{实验一：Echo IME}
+
+\textbf{目标：}建立最小 IMKServer 和控制器，在 Notes 中原样回送字母。
+
+\textbf{约束：}不得引入数据库、候选窗口或自动安装器；核心代码不超过 150 行；必须记录真正进入的回调。
+
+\textbf{步骤：}
+
+\begin{enumerate}
+  \item 新建 macOS App target，配置输入源 plist；
+  \item 创建 IMKServer，并在入口日志记录 bundle path、bundle ID 和 connection name；
+  \item 控制器只处理可打印 ASCII，其他事件放行；
+  \item 安装到用户输入法目录，重新登录或注册；
+  \item 在 Notes 输入 \code{hello 123}，验证无重复和丢字。
+\end{enumerate}
+
+\textbf{验收问题：}返回 true/false 的区别是什么？进程存在为何不足以证明事件进入控制器？
+
+\section{实验二：组合状态}
+
+\textbf{目标：}实现 raw buffer、marked text、退格、Esc 和 Return。
+
+建议先在纯 Swift 中实现：
+
+\begin{lstlisting}[language=Swift,caption={教学状态机接口}]
+enum InputAction: Equatable {
+    case append(Character), deleteBackward, commit, cancel
+}
+
+struct CompositionState: Equatable {
+    var raw = ""
+    mutating func reduce(_ action: InputAction) -> Effect { /* ... */ }
+}
+
+enum Effect: Equatable {
+    case updateMarked(String), insert(String), clearMarked, none
+}
+\end{lstlisting}
+
+用表驱动测试覆盖空闲态与组合态。随后写一个薄适配器，把 Effect 映射到 \code{setMarkedText} 或 \code{insertText}。
+
+\section{实验三：小词库候选}
+
+\textbf{目标：}使用不超过 100 条 TSV 词库完成全拼候选和数字选词。
+
+\textbf{必测输入：}\code{nihao}、\code{beijing}、一个同音词、一个不存在的拼音、一个未完成前缀。候选排序必须有稳定 tie-breaker。报告中展示每个候选的权重和最终排序原因。
+
+\section{实验四：候选窗口}
+
+\textbf{目标：}实现不抢焦点的候选窗、方向键高亮、数字选择、翻页和屏幕边缘定位。
+
+\textbf{截图要求：}屏幕中央、左下角、右下角、多显示器各一张。截图必须同时包含插入点和候选窗，证明没有越界。
+
+\section{评分量表}
+
+\begin{longtable}{p{4cm}p{1.5cm}p{6cm}}
+\toprule
+项目 & 分值 & 判定 \\
+\midrule
+输入源可注册、可选择 & 15 & 使用稳定 ID，无重复条目 \\
+事件所有权正确 & 15 & 无重复、无吞键，修饰键放行 \\
+组合状态正确 & 20 & 退格、取消、提交和失活一致 \\
+候选与部分输入 & 15 & 小词库结果稳定且可解释 \\
+窗口交互 & 15 & 不抢焦点、可导航、不越界 \\
+自动化测试 & 10 & 状态机与词库至少 12 个测试 \\
+实验报告 & 10 & 有失败证据、原因和修复验证 \\
+\bottomrule
+\end{longtable}
+
+
+\chapter{实验五至八：切分、排序、整句与学习}
+
+\section{实验五：切分图}
+
+输入一组拼音，输出 DOT 或文本形式的切分图。至少覆盖全拼、多路径、撇号、简拼、混拼、模糊音和一次错拼。要求验证：完整消费优先、结果确定、非法字符不崩溃。
+
+\textbf{扩展任务：}实现递归搜索与动态规划两种方法，对 1 万条随机输入比较输出与耗时。若结果不同，必须给出反例并解释。
+
+\section{实验六：评分解释器}
+
+为每个候选输出：
+
+\begin{lstlisting}[numbers=none]
+word=天气
+frequency=-3.42
+user=+0.00
+context=+2.18
+fuzzy=-0.00
+partial=-0.00
+incomplete=-0.00
+total=-1.24
+\end{lstlisting}
+
+选择至少十组同音/近音候选，通过消融实验说明每项存在的必要性。调参结论必须来自开发集，不得根据封存测试集逐条修改。
+
+\section{实验七：词格整句}
+
+实现宽度可配置的 Beam Search。测试 \code{woshizhongguoren}、\code{jintiantianqihenhao} 和一条至少 10 音节句子。记录 Beam 宽度为 2、4、8、12、24 时的 top-1、top-5、P50 和 P95。
+
+\textbf{正确性检查：}使用一个很小的词格完整枚举所有路径，与 Beam 宽度足够大时的结果比较。这是用第二种方法验证搜索实现，而不是只相信几个 golden 用例。
+
+\section{实验八：用户学习}
+
+实现用户 unigram、bigram 和最近组词之一。必须支持重启持久化和清空。为数据库故障注入只读、损坏文件和并发选择，证明基本输入仍可用。
+
+\section{实验报告模板}
+
+每个实验按以下结构提交：
+
+\begin{enumerate}
+  \item 问题定义与不变量；
+  \item 两种实现或验证方法；
+  \item 数据集与环境；
+  \item 结果表和至少一幅图；
+  \item 失败案例与原因；
+  \item 对完整 MyIME 源码的对应关系；
+  \item 残余风险与下一步。
+\end{enumerate}
+
+
+\chapter{实验九至十二：兼容、诊断、安全与发布}
+
+\section{实验九：跨客户端兼容矩阵}
+
+选择 Notes、TextEdit、Safari、Chrome、一个 Electron 应用和一个国产办公/通信应用。固定测试 12 条输入序列，包括中英文切换、长句、退格、候选导航、应用切换和进程恢复。
+
+\begin{center}
+\begin{tabular}{lcccccc}
+\toprule
+用例 & Notes & TextEdit & Safari & Chrome & Electron & 其他 \\
+\midrule
+首选上屏 & & & & & & \\
+退格刷新 & & & & & & \\
+候选定位 & & & & & & \\
+应用切换 & & & & & & \\
+进程恢复 & & & & & & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+每个失败必须附最小输入序列和事件路径日志。禁止用“兼容性不好”作为结论。
+
+候选窗口还须在 VoiceOver 下验证：方向键改变高亮时朗读序号与候选，selected 状态可识别，候选窗出现/消失不夺走宿主编辑器焦点。把该结果作为矩阵的一行，而不是只写进文字备注。
+
+\section{实验十：诊断包}
+
+实现一个不包含正文的本地诊断命令，输出：应用版本与路径、签名摘要、当前输入源 ID、TIS 枚举结果、系统版本、芯片架构、词库完整性、用户库 schema 版本和最近 200 行脱敏日志。
+
+在报告中给出威胁分析：哪些字段仍可能间接识别用户？诊断包如何过期和删除？
+
+\section{实验十一：离线与供应链审计}
+
+检查源码依赖和运行时网络连接；确认 Release 包中的第三方许可；验证替换词库入口不能加载损坏或未经验证的文件。对下载 DMG 计算 SHA-256，并与发布页校验和比较。
+
+\section{实验十二：第二台 Mac 发布验收}
+
+目标机器必须满足：没有开发证书、没有源码、没有旧 MyIME 副本。只能从公开 Release 下载 DMG。验收步骤如下：
+
+\begin{enumerate}
+  \item 验证 SHA-256、Developer ID 与公证票据；
+  \item 打开 DMG 并安装，不使用 Xcode 或本地脚本；
+  \item 在系统设置确认 MyIME 位于简体中文分类；
+  \item 在 Notes 输入规定句子并录屏；
+  \item 结束输入法进程，通过 ABC→MyIME 恢复；
+  \item 重启机器后再次验证；
+  \item 卸载并确认用户选择的数据保留/删除策略符合说明。
+\end{enumerate}
+
+\begin{warningbox}[凭据纪律]
+学生不得在报告、截图、录屏或 Git 历史中包含 Apple ID 密码、应用专用密码、证书私钥或钥匙串导出文件。发生泄露应立即撤销，而不是仅删除截图。
+\end{warningbox}
+
+
+\chapter{综合项目：实现一款可解释的离线输入法}
+
+\begin{goals}
+把课程知识转化为独立设计；形成可运行软件、可复现评测和可审查发布物；能够在答辩中用证据说明每个关键决策。
+\end{goals}
+
+综合项目可以在 MyIME 上实现一个明确增量，也可以从教学版继续发展。推荐题目包括：双拼支持、用户词导入导出、评分解释面板、专业领域离线词库、可访问候选窗口、离线词库签名更新、组合状态机重构或跨客户端自动化测试工具。
+
+\section{项目契约}
+
+立项书不超过两页，必须包含：用户问题、范围、明确不做的功能、受影响模块、数据结构变化、隐私变化、测试指标和演示路径。若题目引入网络能力，必须单独通过隐私与安全评审。
+
+\section{最终交付物}
+
+\begin{enumerate}
+  \item 可构建源码与清晰提交历史；
+  \item 设计说明，包含架构图、状态机或算法图；
+  \item 自动化测试与完整命令输出；
+  \item 至少 200 条封存集评测和延迟分布；
+  \item 跨机器兼容矩阵；
+  \item 签名/公证发布物或明确标记的开发演示包；
+  \item 三分钟演示视频与十分钟技术答辩。
+\end{enumerate}
+
+\section{100 分三级评分量表}
+
+“卓越”通常获得该项 85--100\% 分值，“合格”获得 60--84\%，“不合格”获得 0--59\%。严重安全事故、无法构建或伪造数据可触发课程规则中的额外封顶；助教必须在评语中引用具体提交证据，不能只写主观印象。
+
+{\small
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{2.1cm}p{.8cm}p{3.25cm}p{3.25cm}p{3.25cm}}
+\toprule
+维度 & 分 & 卓越 & 合格 & 不合格 \\
+\midrule
+\endfirsthead
+\toprule
+维度 & 分 & 卓越 & 合格 & 不合格 \\
+\midrule
+\endhead
+问题与范围 & 10 & 用户问题、非目标、成功指标和变更契约均可验证；范围变化有记录 & 目标基本明确，能演示主要路径；少量非目标或指标模糊 & 只有功能口号；范围持续漂移，无法判定完成 \\
+架构 & 15 & 系统/算法/存储/UI 边界明确；主线程、锁和失败降级有图与不变量 & 能说明主要模块，依赖方向大体合理；存在局部耦合但可维护 & 控制器包揽全部逻辑；共享状态无所有权，修改一处破坏多处 \\
+核心正确性 & 20 & 正常、边界、失败路径齐全；关键算法由完整枚举、模型或第二实现交叉验证 & 主流程和常见边界正确；测试覆盖主要不变量，但验证方法单一 & 吞键、重复上屏、崩溃或错误提交可稳定复现；只靠演示样例 \\
+准确率与性能 & 15 & 训练/开发/封存集隔离；报告 top-k、P50/P95/P99、样本量及误差分析；优化有前后对照 & 有固定数据集与 P95；结果可复现，但分层/误差分析不完整 & 用挑选样例或“感觉更快”代替指标；测试集被用于逐例调参 \\
+系统兼容 & 10 & 多客户端、多屏、生命周期、VoiceOver 和第二台 Mac 均有最小复现证据 & Notes 加至少两类客户端通过；恢复和坐标边界有基本验证 & 仅开发机单一文本框可用；依赖守护进程或手工脚本维持 \\
+隐私与安全 & 10 & 数据流、日志脱敏、文件权限、许可、签名/公证和凭据撤销策略完整 & 无网络或网络用途清楚；无正文日志和已知明文凭据；许可基本齐全 & 上传/记录正文未告知；提交密码、私钥；来源或许可无法说明 \\
+测试工程 & 10 & 纯逻辑、存储、系统适配分层；历史故障有回归；失败输出可定位且无顺序依赖 & 自动化覆盖核心模块并能一键运行；少量系统步骤仍需人工 & 测试不能运行、依赖个人机器状态，或只有截图无断言 \\
+表达与答辩 & 10 & 能从按键到上屏逐层解释，并现场说明分数、剪枝、锁、SQL 和发布证据 & 能解释主要设计与已知限制；在提示下可定位源码和测试 & 无法区分 marked/commit、事件所有权或发布签名；报告与实现矛盾 \\
+\bottomrule
+\end{longtable}
+}
+
+\section{答辩必问十题}
+
+\begin{enumerate}
+  \item 当前按键由哪个入口收到，为什么？
+  \item 返回 true/false 会怎样？
+  \item raw、preedit、marked text 和 commit 分别存在哪里？
+  \item 展示一个候选的完整分数分解。
+  \item 展示一个切分歧义和一个词格剪枝。
+  \item 用户词库损坏时怎样降级？
+  \item 哪些日志可能泄露隐私？
+  \item 为什么开发机成功不能证明 Release 成功？
+  \item 你的测试集如何避免泄漏？
+  \item 如果再给两周，你会优先消除哪个风险？
+\end{enumerate}
+
+\begin{summarybox}
+综合项目的目标不是复制 MyIME 功能数量，而是证明学生能够用系统模型、算法、测试和发布证据完成一个可信的输入法增量。
+\end{summarybox}

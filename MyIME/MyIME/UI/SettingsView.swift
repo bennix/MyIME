@@ -19,7 +19,7 @@ struct SettingsView: View {
                 .tabItem { Label("词库", systemImage: "books.vertical") }
         }
         .padding(16)
-        .onChange(of: preferences) { _, value in PreferencesStore.save(value) }
+        .onChange(of: preferences) { value in PreferencesStore.save(value) }
     }
 
     private var general: some View {

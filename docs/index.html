@@ -18,6 +18,7 @@
     </a>
     <nav aria-label="主导航">
       <a href="#features">特点</a>
+      <a href="#course">教材</a>
       <a href="#install">安装</a>
       <a href="https://github.com/bennix/MyIME">GitHub</a>
       <a class="nav-download" href="https://github.com/bennix/MyIME/releases/download/v1.0.12/MyIME-1.0.12-developer-id-arm64.dmg">下载 1.0.12</a>
@@ -71,7 +72,7 @@
         </li>
         <li>
           <span aria-hidden="true">📦</span>
-          <div><strong>丰富本地语料</strong><p>内置约 115 万条高质量本地词库，整合 Rime-Ice、清华语料、新华/语义等词表及社区派生数据，出字精准。</p></div>
+          <div><strong>丰富本地语料</strong><p>内置 1,160,989 条本地候选记录，整合 Rime-Ice、青简、清华语料、新华/语义等词表及社区派生数据，出字精准。</p></div>
         </li>
         <li>
           <span aria-hidden="true">🔒</span>
@@ -96,6 +97,25 @@
         </a>
         <figcaption><span aria-hidden="true">●</span> MyIME 实机录制 · 点击放大</figcaption>
       </figure>
+    </section>
+
+    <section class="course section-shell" id="course" aria-labelledby="course-title">
+      <div class="course-copy">
+        <p class="eyebrow">从能用，到真正理解</p>
+        <h2 id="course-title">197 页源码教材，<br>十二级实验脚手架。</h2>
+        <p>《从零实现 macOS 中文输入法》面向学生分初级与高级两部分，结合 MyIME 源码讲解 InputMethodKit、AppKit 坐标、拼音切分、候选评分、Beam Search、本地学习、调试与跨机器发布。</p>
+        <div class="course-actions">
+          <a class="button primary" href="https://github.com/bennix/MyIME/raw/refs/heads/main/output/pdf/MyIME-Textbook.pdf">下载 PDF 教材</a>
+          <a class="button secondary" href="https://github.com/bennix/MyIME/tree/main/docs/textbook">查看 LaTeX / MetaPost 源码</a>
+        </div>
+      </div>
+      <div class="course-board" aria-label="课程组成">
+        <article><strong>初级篇</strong><span>IMK 生命周期、事件所有权、候选窗口与坐标转换</span></article>
+        <article><strong>高级篇</strong><span>DAG 切分、评分解释、词格与 Beam Search</span></article>
+        <article><strong>工程篇</strong><span>Console、TSan、Time Profiler、签名公证与故障排查</span></article>
+        <article><strong>12 个 Starter</strong><span>独立 Git 历史，不含完整产品源码与实验答案</span></article>
+        <a class="course-branches" href="https://github.com/bennix/MyIME/branches">浏览 lab1-starter 至 lab12-starter <span aria-hidden="true">↗</span></a>
+      </div>
     </section>
 
     <section class="features section-shell" id="features" aria-labelledby="features-title">
@@ -132,7 +152,7 @@
         <article class="feature feature-system">
           <span class="feature-tag">系统</span>
           <h3>按 macOS 输入法方式运行</h3>
-          <p>采用成熟的 IMK 生命周期：服务提前建立、切换后清理残留候选；登录后自动恢复输入源注册，更新后重绑前台会话，并正确归类到「简体中文」。1.0.12 修复了微信、浏览器及 Electron 应用的输入连接，并完善候选展开、方向键和光标指示器。名称、词库和学习引擎仍然都是 MyIME。</p>
+          <p>采用成熟的 IMK 生命周期，启动后自动注册并恢复输入服务。1.0.12 修复微信、浏览器、Codex 等 WebKit/Electron 文本框的组合输入连接，并完善候选展开、方向键和光标指示器。</p>
           <div class="system-route" aria-hidden="true"><span>应用</span><i></i><b>MyIME</b><i></i><span>本地词库</span></div>
         </article>
       </div>
@@ -142,7 +162,6 @@
       <div class="dictionary-copy">
         <p class="eyebrow">词库不是一份名单，而是表达的底色</p>
         <h2 id="dict-title">从日常用语到专业词汇，都在本地。</h2>
-        <p>内置青简词库与语料频次，合并后共 1,160,989 条候选记录；包含可关闭的离线英文释义，以及 <code>rq</code> 日期、<code>sj</code> 时间、<code>xq</code> 星期快捷候选。</p>
         <p>基础词库结合 Rime-Ice、THUOCL、中文维基、新华词典与语义知识库等公开词表，以及新闻、百科问答等语料派生的字三元与词级语言模型。默认输出简体；可选繁体只转换显示和上屏，仍共享同一套 MyIME 词库与学习记录。</p>
       </div>
       <ul class="source-cloud" aria-label="词库来源">
@@ -157,11 +176,11 @@
       </div>
       <ol class="install-steps">
         <li><span>下载</span><p>从 GitHub Release 获取最新 DMG。</p></li>
-        <li><span>打开</span><p>双击 MyIME，按提示授权自动安装。</p></li>
+        <li><span>打开</span><p>双击 MyIME 自动安装；从 1.0.8 或更早版本升级时按提示清理旧副本。</p></li>
         <li><span>切换</span><p>在菜单栏输入法列表中选择 MyIME。</p></li>
       </ol>
       <div class="install-note">
-        <p><strong>版本 1.0.12 · 构建 82</strong><br>采用 Apple Developer ID 签名，适用于 Apple Silicon Mac。当前版本尚未完成 Apple 公证；如果首次打开被阻止，请按住 Control 点击应用并选择“打开”。</p>
+        <p><strong>版本 1.0.12 · 构建 82</strong><br>适用于 Apple Silicon Mac。安装镜像使用 Developer ID 签名，尚未完成 Apple 公证。</p>
         <a class="button primary" href="https://github.com/bennix/MyIME/releases/download/v1.0.12/MyIME-1.0.12-developer-id-arm64.dmg">获取 1.0.12 安装镜像</a>
       </div>
     </section>

@@ -297,3 +297,4 @@ enum SelfInstaller {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
+

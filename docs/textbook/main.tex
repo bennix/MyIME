@@ -1,0 +1,159 @@
+\documentclass[UTF8,11pt,openany]{ctexbook}
+\usepackage[b5paper,inner=20mm,outer=17mm,top=20mm,bottom=22mm,headheight=14pt]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{graphicx,float,caption,subcaption}
+\usepackage{xcolor,booktabs,longtable,tabularx,array,multirow}
+\usepackage{enumitem,multicol}
+\usepackage{listings}
+\usepackage[most]{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{setspace}
+\usepackage{hyperref}
+\usepackage{xurl}
+\usepackage{bookmark}
+\usepackage{imakeidx}
+\usepackage{etoolbox}
+
+\definecolor{MyBlue}{HTML}{175CD3}
+\definecolor{MyDark}{HTML}{172B4D}
+\definecolor{MyCyan}{HTML}{0E7490}
+\definecolor{MyGreen}{HTML}{16803A}
+\definecolor{MyOrange}{HTML}{B54708}
+\definecolor{MyRed}{HTML}{B42318}
+\definecolor{CodeBg}{HTML}{F6F8FA}
+\definecolor{RuleGray}{HTML}{D0D5DD}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=MyBlue,
+  urlcolor=MyCyan,
+  citecolor=MyGreen,
+  pdftitle={从零实现 macOS 中文输入法},
+  pdfauthor={MyIME 教学项目}
+}
+
+\setstretch{1.24}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.18em}
+\emergencystretch=3em
+\setlist{itemsep=0.25em,topsep=0.35em}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\color{MyDark}\leftmark}
+\fancyhead[RO]{\small\color{MyDark}\rightmark}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\chaptermark}[1]{\markboth{第\thechapter 章\quad #1}{}}
+\renewcommand{\sectionmark}[1]{\markright{\thesection\quad #1}}
+
+\titleformat{\chapter}[display]
+  {\bfseries\color{MyDark}}
+  {\filleft\fontsize{38}{42}\selectfont\color{MyBlue}\thechapter}
+  {0.3em}
+  {\titlerule\vspace{0.8ex}\Huge}
+\titlespacing*{\chapter}{0pt}{-12pt}{22pt}
+
+\lstdefinelanguage{Swift}{
+  morekeywords={import,class,struct,enum,protocol,extension,func,var,let,private,public,internal,static,final,override,init,guard,if,else,for,in,where,return,throw,throws,try,catch,as,is,nil,true,false,self,Self,weak,any,some,actor,async,await},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]"
+}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{MyBlue}\bfseries,
+  commentstyle=\color{MyGreen},
+  stringstyle=\color{MyOrange},
+  backgroundcolor=\color{CodeBg},
+  frame=single,
+  rulecolor=\color{RuleGray},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=7pt,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  tabsize=2,
+  literate={≈}{{$\approx$}}1 {😀}{{[emoji]}}7 {🏥}{{[emoji]}}7 {⚠}{{!}}1,
+  captionpos=b,
+  aboveskip=0.8em,
+  belowskip=0.8em
+}
+
+\newtcolorbox{goals}{
+  breakable,colback=MyBlue!4,colframe=MyBlue!65!black,
+  title={\bfseries 学习目标},fonttitle=\bfseries
+}
+\newtcolorbox{concept}[1][]{
+  breakable,colback=MyCyan!4,colframe=MyCyan!70!black,
+  title={\bfseries 核心概念\ifstrempty{#1}{}{：#1}}
+}
+\newtcolorbox{lab}[1][]{
+  breakable,colback=MyGreen!4,colframe=MyGreen!70!black,
+  title={\bfseries 动手实验\ifstrempty{#1}{}{：#1}}
+}
+\newtcolorbox{warningbox}[1][]{
+  breakable,colback=MyOrange!5,colframe=MyOrange!75!black,
+  title={\bfseries 工程警告\ifstrempty{#1}{}{：#1}}
+}
+\newtcolorbox{sourcewalk}[1][]{
+  breakable,colback=CodeBg,colframe=MyDark!55,
+  title={\bfseries 源码导读\ifstrempty{#1}{}{：#1}}
+}
+\newtcolorbox{summarybox}{
+  breakable,colback=MyDark!3,colframe=MyDark!65,
+  title={\bfseries 本章小结}
+}
+
+\newcommand{\term}[1]{\textbf{#1}\index{#1}}
+\urlstyle{tt}
+\newcommand{\code}[1]{\nolinkurl{#1}}
+\newcommand{\key}[1]{\fbox{\sffamily\small #1}}
+\newcommand{\repo}{\texttt{MyIME}}
+\newcommand{\sourcefile}[1]{\nolinkurl{#1}}
+\newcommand{\figmp}[3][.88\linewidth]{%
+  \begin{figure}[htbp]
+    \centering
+    \includegraphics[width=#1]{figures-#2.mps}
+    \caption{#3}
+  \end{figure}
+}
+\newcommand{\exercises}{\section*{思考与练习}\addcontentsline{toc}{section}{思考与练习}}
+\newcommand{\checkpoint}[1]{\par\noindent\textbf{检查点：}#1\par}
+
+\makeindex[title=术语索引,columns=2]
+
+\begin{document}
+
+\frontmatter
+\input{frontmatter}
+\tableofcontents
+
+\mainmatter
+\part{初级篇：让文字真正上屏}
+\input{chapters-beginner}
+
+\part{高级篇：从候选词到语言模型}
+\input{chapters-advanced}
+
+\part{工程篇：把实验变成可发布的软件}
+\input{chapters-engineering}
+
+\part{课程实验与综合项目}
+\input{labs-and-projects}
+
+\appendix
+\input{appendices}
+
+\backmatter
+\printindex
+\input{backmatter}
+
+\end{document}

@@ -19,7 +19,7 @@ MyIME 是一个 **macOS 全拼中文输入法**，基于 **InputMethodKit (IMK)*
 ## 1. 现状与目标
 
 ### 1.1 仓库现状（已核实）
-- 平台：macOS，`SDKROOT = macosx`，`MACOSX_DEPLOYMENT_TARGET = 26.5`，`SWIFT_VERSION = 5.0`。
+- 平台：macOS，`SDKROOT = macosx`，`MACOSX_DEPLOYMENT_TARGET = 13.0`，`SWIFT_VERSION = 5.0`。
 - Bundle id：`fudan.miniS.MyIME`；`DEVELOPMENT_TEAM = 5N66S29EK2`。
 - 目标：`MyIME`（App）、`MyIMETests`、`MyIMEUITests`。
 - 现有代码为默认模板：`MyIMEApp.swift`（SwiftData `ModelContainer`）、`ContentView.swift`（Item 列表）、`Item.swift`（`@Model`）。
