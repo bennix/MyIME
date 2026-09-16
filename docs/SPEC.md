@@ -111,7 +111,7 @@ MyIME/
 
 ### 3.3 IMK 注册（Info.plist，MUST 精确）
 输入法靠 `Info.plist` 键被系统发现。MUST 包含：
-- `InputMethodConnectionName`（String）：如 `MyIME_1_Connection`。MUST 与 §3.5 `IMKServer(name:)` 完全一致。
+- `InputMethodConnectionName`（String）：`MyIME_Connection`。与 §3.5 `IMKServer(name:)` 完全一致；采用程序名加 `_Connection` 的命名方式（参照 Squirrel 与 WeType），不要与系统生成的 Mach endpoint 名称混淆。
 - `InputMethodServerControllerClass`（String）：主控制器类的 **Objective-C 运行时名**，如 `MyIME.MyIMEInputController`（Swift 类需 `@objc(...)` 或含模块前缀）。
 - `tsInputMethodCharacterRepertoireKey`（Array<String>）：`["zh-Hans"]`。
 - `ComponentInputModeDict` → `tsInputModeListKey` → 输入模式字典：
@@ -135,7 +135,7 @@ MyIME/
 ### 3.5 IMKServer 启动
 ```swift
 // IMKBootstrap.swift（示意，非最终代码）
-let server = IMKServer(name: "MyIME_1_Connection",
+let server = IMKServer(name: "MyIME_Connection",
                        bundleIdentifier: Bundle.main.bundleIdentifier)
 ```
 - MUST 在 `@main` 应用启动最早期创建并强引用 `IMKServer`，生命周期与进程一致。

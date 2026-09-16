@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import InputMethodKit
 import IMEKit
 import os
@@ -23,7 +24,11 @@ final class MyIMEInputController: IMKInputController {
     private var composedPinyin: [String] = []
     private var hasNavigatedCandidates = false
     private var showingSuggestions = false
-    private weak var activeClient: (any IMKTextInput)?
+    private var didLogInputPath = false
+    private var diagnosticEventCount = 0
+    // Keep the IMK client proxy alive between key callbacks and palette clicks.
+    // Release it in deactivateServer when the session loses focus.
+    private var activeClient: (any IMKTextInput)?
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
@@ -38,6 +43,10 @@ final class MyIMEInputController: IMKInputController {
         logger.notice("输入会话已建立")
     }
 
+    private func textClient(from sender: Any?) -> (any IMKTextInput)? {
+        (sender as? any IMKTextInput) ?? client()
+    }
+
     override func recognizedEvents(_ sender: Any!) -> Int {
         Int(NSEvent.EventTypeMask.keyDown.rawValue | NSEvent.EventTypeMask.flagsChanged.rawValue)
     }
@@ -47,7 +56,7 @@ final class MyIMEInputController: IMKInputController {
         englishMode = false
         shiftWasDown = CGEventSource.flagsState(.combinedSessionState).contains(.maskShift)
         shiftUsedWithKey = false
-        if let client = sender as? IMKTextInput {
+        if let client = textClient(from: sender) {
             activeClient = client
             Self.activatedController = self
             client.overrideKeyboard(withKeyboardNamed: "com.apple.keylayout.ABC")
@@ -60,10 +69,71 @@ final class MyIMEInputController: IMKInputController {
     }
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
-        guard let event, let client = sender as? IMKTextInput else { return false }
+        logInputPath("NSEvent")
+        guard let event, let client = textClient(from: sender) else { return false }
         activeClient = client
         logger.debug("收到输入事件：type=\(event.type.rawValue), keyCode=\(event.keyCode)")
         return safelyHandle(event, client: client)
+    }
+
+    // WebKit/Electron can request text-data delivery instead of NSEvent delivery.
+    // Route all delivery modes through the same composition/selection behavior.
+    override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
+        logInputPath("text-data")
+        if diagnosticEventCount < 3 {
+            diagnosticEventCount += 1
+            logger.notice("输入回调状态：client=\(self.textClient(from: sender) != nil), key=\(keyCode), flags=\(flags), textPresent=\(string != nil)")
+        }
+        guard let client = textClient(from: sender),
+              (0...Int(UInt16.max)).contains(keyCode) else { return false }
+        activeClient = client
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero,
+            modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(bitPattern: flags)),
+            timestamp: 0, windowNumber: 0, context: nil,
+            characters: string ?? "", charactersIgnoringModifiers: string ?? "",
+            isARepeat: false, keyCode: UInt16(keyCode)
+        ) else { return false }
+        return safelyHandle(event, client: client)
+    }
+
+    override func inputText(_ string: String!, client sender: Any!) -> Bool {
+        logInputPath("text-only")
+        guard let string, !string.isEmpty, !englishMode,
+              let client = textClient(from: sender) else { return false }
+        activeClient = client
+        for character in string {
+            let key: Int
+            switch character {
+            case " ": key = 49
+            case "\n", "\r": key = 36
+            case "\u{7f}", "\u{8}": key = 51
+            case "\u{1b}": key = 53
+            default: key = 0
+            }
+            if !inputText(String(character), key: key, modifiers: 0, client: client) {
+                client.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+            }
+        }
+        return true
+    }
+
+    private func logInputPath(_ path: String) {
+        guard !didLogInputPath else { return }
+        didLogInputPath = true
+        logger.notice("输入会话事件路径：\(path, privacy: .public)")
+    }
+
+    override func didCommand(by selector: Selector!, client sender: Any!) -> Bool {
+        guard let selector else { return false }
+        let keyCodes: [String: Int] = [
+            "deleteBackward:": 51, "cancelOperation:": 53,
+            "insertNewline:": 36, "insertLineBreak:": 36,
+            "moveLeft:": 123, "moveRight:": 124, "moveDown:": 125, "moveUp:": 126,
+            "pageUp:": 116, "pageDown:": 121,
+        ]
+        guard let key = keyCodes[NSStringFromSelector(selector)] else { return false }
+        return inputText("", key: key, modifiers: 0, client: sender)
     }
 
     override func deactivateServer(_ sender: Any!) {
@@ -78,7 +148,7 @@ final class MyIMEInputController: IMKInputController {
             }
             activeClient = nil
         }
-        guard let client = sender as? IMKTextInput else {
+        guard let client = textClient(from: sender) else {
             super.deactivateServer(sender)
             return
         }
@@ -106,7 +176,7 @@ final class MyIMEInputController: IMKInputController {
     }
 
     override func commitComposition(_ sender: Any!) {
-        guard let client = sender as? IMKTextInput else { return }
+        guard let client = textClient(from: sender) else { return }
         if !raw.isEmpty || !composedPhrase.isEmpty {
             commit(composedPhrase + raw, pinyin: [], client: client, learn: false)
         }
@@ -122,6 +192,11 @@ final class MyIMEInputController: IMKInputController {
                 if !shiftUsedWithKey {
                     if !raw.isEmpty { commit(composedPhrase + raw, pinyin: [], client: client, learn: false) }
                     englishMode.toggle()
+                    if englishMode {
+                        inputModeIndicator.hide()
+                    } else {
+                        inputModeIndicator.show(client: client)
+                    }
                 }
                 shiftUsedWithKey = false
             }
@@ -190,9 +265,9 @@ final class MyIMEInputController: IMKInputController {
             return moveDown()
         case 126: // Up
             return moveUp()
-        case 27, 43: // - or ,
+        case 27, 43, 116: // - or , or Page Up
             return movePage(-1)
-        case 24, 47: // = or .
+        case 24, 47, 121: // = or . or Page Down
             return movePage(1)
         default:
             break
@@ -246,6 +321,7 @@ final class MyIMEInputController: IMKInputController {
     }
 
     private func refresh(_ client: IMKTextInput) {
+        inputModeIndicator.hide()
         showingSuggestions = false
         let prefs = PreferencesStore.load()
         output = addingEnglishCandidates(to: engine.update(raw, prefs: prefs))
@@ -253,8 +329,18 @@ final class MyIMEInputController: IMKInputController {
         highlighted = 0
         expandedCandidates = false
         hasNavigatedCandidates = false
-        let marked = localized(composedPhrase, prefs: prefs) + (output.preedit.isEmpty ? raw : output.preedit)
-        client.setMarkedText(marked, selectionRange: NSRange(location: marked.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        let converted = localized(composedPhrase, prefs: prefs)
+        let marked = NSMutableAttributedString(string: converted + (output.preedit.isEmpty ? raw : output.preedit))
+        let convertedLength = converted.utf16.count
+        for (range, style) in [
+            (NSRange(location: 0, length: convertedLength), kTSMHiliteConvertedText),
+            (NSRange(location: convertedLength, length: marked.length - convertedLength), kTSMHiliteSelectedRawText),
+        ] where range.length > 0 {
+            if let attributes = mark(forStyle: style, at: range) as? [NSAttributedString.Key: Any] {
+                marked.setAttributes(attributes, range: range)
+            }
+        }
+        client.setMarkedText(marked, selectionRange: NSRange(location: marked.length, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         candidateWindow.update(
             candidates: localizedCandidates(visibleCandidates, prefs: prefs),
             highlighted: highlighted,
@@ -310,7 +396,7 @@ final class MyIMEInputController: IMKInputController {
     private func commit(_ text: String, pinyin: [String], client: IMKTextInput, learn: Bool, suggest: Bool = false) {
         let committedText = localized(text, prefs: PreferencesStore.load())
         client.insertText(committedText, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
-        client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        client.setMarkedText(NSAttributedString(string: ""), selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         if learn { engine.commitLearning(word: text, pinyin: pinyin) }
         if pinyin.isEmpty { engine.breakPhraseLearningContext() }
         raw = ""
@@ -323,11 +409,14 @@ final class MyIMEInputController: IMKInputController {
         } else {
             clearSuggestions()
         }
+        if !englishMode, !showingSuggestions, Self.activatedController === self, SelfInstaller.isCurrentInputSource {
+            inputModeIndicator.show(client: client)
+        }
     }
 
     private func showSuggestions(_ client: IMKTextInput) {
         let prefs = PreferencesStore.load()
-        let suggestions = engine.suggestions(limit: prefs.pageSize)
+        let suggestions = engine.suggestions(limit: max(36, prefs.pageSize))
         guard !suggestions.isEmpty else {
             clearSuggestions()
             return
@@ -339,7 +428,7 @@ final class MyIMEInputController: IMKInputController {
         expandedCandidates = false
         hasNavigatedCandidates = false
         candidateWindow.update(
-            candidates: localizedCandidates(suggestions, prefs: prefs),
+            candidates: localizedCandidates(visibleCandidates, prefs: prefs),
             highlighted: highlighted,
             prefs: prefs,
             expanded: false,
@@ -356,8 +445,9 @@ final class MyIMEInputController: IMKInputController {
     }
 
     private func commitSuggestion(_ visibleIndex: Int, client: IMKTextInput) {
-        guard showingSuggestions, output.candidates.indices.contains(visibleIndex) else { return }
-        let suggestion = output.candidates[visibleIndex]
+        let index = page * candidatePageSize + visibleIndex
+        guard showingSuggestions, output.candidates.indices.contains(index) else { return }
+        let suggestion = output.candidates[index]
         let prefs = PreferencesStore.load()
         client.insertText(
             localized(suggestion.word, prefs: prefs),
@@ -376,7 +466,7 @@ final class MyIMEInputController: IMKInputController {
         composedPhrase = ""
         composedPinyin = []
         hasNavigatedCandidates = false
-        client.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        client.setMarkedText(NSAttributedString(string: ""), selectionRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         clearSuggestions()
     }
 
@@ -391,7 +481,6 @@ final class MyIMEInputController: IMKInputController {
 
     private func moveDown() -> Bool {
         guard !raw.isEmpty || showingSuggestions else { return false }
-        if showingSuggestions { return moveHighlight(1) }
         if !expandedCandidates {
             expandedCandidates = true
             page = 0
@@ -404,13 +493,12 @@ final class MyIMEInputController: IMKInputController {
 
     private func moveUp() -> Bool {
         guard !raw.isEmpty || showingSuggestions else { return false }
-        if showingSuggestions { return moveHighlight(-1) }
         guard expandedCandidates else { return false }
         return highlighted >= 6 ? moveHighlight(-6) : true
     }
 
     private func collapseCandidates() {
-        guard !raw.isEmpty, expandedCandidates else { return }
+        guard (!raw.isEmpty || showingSuggestions), expandedCandidates else { return }
         expandedCandidates = false
         page = 0
         highlighted = 0

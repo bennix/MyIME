@@ -14,7 +14,7 @@ struct MyIMEApplication {
         }
         let server: IMKServer? = if SelfInstaller.isRunningInstalledCopy {
             IMKServer(
-                name: Bundle.main.object(forInfoDictionaryKey: "InputMethodConnectionName") as! String,
+                name: Bundle.main.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String,
                 bundleIdentifier: Bundle.main.bundleIdentifier
             )
         } else {
@@ -24,7 +24,9 @@ struct MyIMEApplication {
         let delegate = AppDelegate(server: server)
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
-        app.run()
+        withExtendedLifetime((delegate, server)) {
+            app.run()
+        }
     }
 }
 
@@ -83,10 +85,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             logger.error("已安装输入法未能建立 IMK 服务")
             return
         }
-        _ = IMEEnvironment.shared
         _ = SelfInstaller.ensureRegistered(logger: logger)
         SelfInstaller.ensureLoginRegistration(logger: logger)
         installStatusMenu()
+        logger.notice("IMK 服务已启动，正在加载本地词库")
+        _ = IMEEnvironment.shared
+        logger.notice("本地词库加载完成")
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(inputSourceChanged(_:)),

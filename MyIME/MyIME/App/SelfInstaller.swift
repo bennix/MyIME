@@ -19,7 +19,19 @@ enum SelfInstaller {
     static func performCommandIfRequested(logger: Logger) -> Bool {
         guard let command = ProcessInfo.processInfo.arguments.dropFirst().first else { return false }
         switch command {
-        case "--register-input-source", "--install":
+        case "--install":
+            // Installation must proceed through the normal app lifecycle.
+            return false
+        case "--register-input-source":
+            let bundleID = Bundle.main.bundleIdentifier ?? "fudan.miniS.inputmethod.MyIME"
+            let serviceAlreadyRunning = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .contains {
+                    $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                        && $0.bundleURL?.resolvingSymlinksInPath() == installedURL.resolvingSymlinksInPath()
+                }
+            // Login/install launches need a persistent IMKServer, not only a
+            // one-second registration helper. Existing servers can be reused.
+            guard serviceAlreadyRunning else { return false }
             _ = ensureRegistered(logger: logger)
         case "--enable-input-source":
             _ = setInputSourceEnabled(true, logger: logger)
@@ -56,10 +68,9 @@ enum SelfInstaller {
 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            let executable = installed.appendingPathComponent("Contents/MacOS/MyIME").path
             process.arguments = [
                 "-c",
-                "sleep 1; /usr/bin/killall MyIME 2>/dev/null; sleep 1; \(shellQuote(executable)) --register-input-source"
+                "sleep 1; /usr/bin/killall MyIME 2>/dev/null; sleep 1; /usr/bin/open \(shellQuote(installed.path)) --args --register-input-source"
             ]
             try process.run()
             DispatchQueue.main.async { NSApp.terminate(nil) }
@@ -74,8 +85,7 @@ enum SelfInstaller {
         register(installedURL, logger: logger)
     }
 
-    /// 安装登录时自动运行 `--register-input-source` 的 LaunchAgent，
-    /// 保证重启后输入源的注册与启用不依赖系统缓存状态。
+    /// 登录时注册并保持 IMK 服务运行；已有服务时仅刷新注册。
     static func ensureLoginRegistration(logger: Logger) {
         let agentDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)

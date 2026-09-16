@@ -136,7 +136,9 @@ final class CandidateWindowController {
         let characterIndex = selectedLocation == NSNotFound ? 0 : selectedLocation
         _ = client.attributes(forCharacterIndex: characterIndex, lineHeightRectangle: &lineRect)
         let fallback = NSEvent.mouseLocation
-        let anchor = lineRect.isEmpty ? NSRect(origin: fallback, size: .zero) : lineRect
+        // A caret normally has zero width; it is still a valid text position.
+        let hasCaret = lineRect.height > 0 && lineRect.origin.x.isFinite && lineRect.origin.y.isFinite
+        let anchor = hasCaret ? lineRect : NSRect(origin: fallback, size: .zero)
         let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) })
             ?? NSScreen.screens.first(where: { $0.frame.contains(fallback) })
             ?? NSScreen.main
@@ -195,26 +197,32 @@ final class InputModeIndicatorController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
+        panel.ignoresMouseEvents = true
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView:
-            HStack(spacing: 7) {
-                Text("中")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7))
-                Text("MyIME")
-                    .font(.system(size: 15, weight: .semibold))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.primary.opacity(0.18), lineWidth: 1)
-            }
-        )
+        let background = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 132, height: 40))
+        background.material = .popover
+        background.state = .active
+        background.wantsLayer = true
+        background.layer?.cornerRadius = 10
+        background.layer?.masksToBounds = true
+        let badge = NSTextField(labelWithString: "中")
+        badge.frame = NSRect(x: 8, y: 6, width: 28, height: 28)
+        badge.font = .boldSystemFont(ofSize: 18)
+        badge.alignment = .center
+        badge.textColor = .white
+        badge.backgroundColor = .controlAccentColor
+        badge.drawsBackground = true
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 6
+        badge.layer?.masksToBounds = true
+        let title = NSTextField(labelWithString: "MyIME")
+        title.frame = NSRect(x: 44, y: 10, width: 80, height: 22)
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.textColor = .labelColor
+        background.addSubview(badge)
+        background.addSubview(title)
+        panel.contentView = background
     }
 
     func show(client: IMKTextInput) {
@@ -232,7 +240,8 @@ final class InputModeIndicatorController {
         let characterIndex = selectedLocation == NSNotFound ? 0 : selectedLocation
         _ = client.attributes(forCharacterIndex: characterIndex, lineHeightRectangle: &lineRect)
         let fallback = NSEvent.mouseLocation
-        let anchor = lineRect.isEmpty ? NSRect(origin: fallback, size: .zero) : lineRect
+        let hasCaret = lineRect.height > 0 && lineRect.origin.x.isFinite && lineRect.origin.y.isFinite
+        let anchor = hasCaret ? lineRect : NSRect(origin: fallback, size: .zero)
         let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) })
             ?? NSScreen.screens.first(where: { $0.frame.contains(fallback) })
             ?? NSScreen.main
@@ -243,10 +252,8 @@ final class InputModeIndicatorController {
         )
         panel.setFrameOrigin(origin)
         panel.orderFrontRegardless()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self, self.displayGeneration == generation else { return }
-            self.panel.orderOut(nil)
-        }
+        // Keep the idle input-mode indicator visible until composition starts
+        // or the input session is deactivated.
     }
 
     func hide() {
