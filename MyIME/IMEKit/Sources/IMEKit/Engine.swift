@@ -13,8 +13,8 @@ public final class Engine: IMEEngine, @unchecked Sendable {
     /// score on the same, comparable scale: every extra word costs `wordPenalty`
     /// (≈ -ln P of a top-frequency word) unless a strong bigram/trigram pays it back.
     private enum Scale {
-        static let logRange = 16.0        // dynamic range of the pseudo log-probability
-        static let wordPenalty = 3.2      // per-word insertion cost
+        static let logRange = 12.0        // dynamic range of the pseudo log-probability
+        static let wordPenalty = 4.0      // per-word insertion cost
         static let bigramReward = 6.0     // system word-bigram transition reward
         static let userBigramReward = 1.4 // user bigram reward (log1p count, 0..4)
         static let trigramReward = 1.6    // char-trigram boundary reward
@@ -25,6 +25,7 @@ public final class Engine: IMEEngine, @unchecked Sendable {
         static let prefixPenalty = 0.8    // speculative pinyin-prefix completion
         static let completionPenalty = 0.8 // per syllable the completion adds beyond typed tail
         static let incompletePenalty = 5.0 // scaled by unconsumed input ratio
+        static let maxLatticeSyllables = 32 // bounded further by the per-update deadline
     }
 
     public init(store: any CandidateLookup, userStore: UserStore? = nil, segmenter: Segmenter = Segmenter()) {
@@ -61,12 +62,19 @@ public final class Engine: IMEEngine, @unchecked Sendable {
                 + (userStore?.lookup(pinyinKey: pinyinKey, initials: initials, limit: 100) ?? []))
                 .map { ($0, path.consumedLength, 0) }
             if path.syllables.count > 1, let first = path.syllables.first {
-                let firstInitials = first.count == 1 ? first : ""
-                let fallback = (store.lookup(pinyinKey: first, initials: firstInitials, disabledSourceMask: prefs.disabledSourceMask, limit: 30)
-                    + (userStore?.lookup(pinyinKey: first, initials: firstInitials, limit: 30) ?? []))
+                // A full first syllable only needs its exact single-syllable readings; the
+                // prefix lookup (OR GLOB + temp sort) is reserved for an abbreviated initial.
+                let fallbackEntries: [StoreEntry]
+                if first.count == 1 {
+                    fallbackEntries = store.lookup(pinyinKey: first, initials: first, disabledSourceMask: prefs.disabledSourceMask, limit: 30)
+                        + (userStore?.lookup(pinyinKey: first, initials: first, limit: 30) ?? [])
+                } else {
+                    fallbackEntries = store.lookupExact(pinyinKey: first, disabledSourceMask: prefs.disabledSourceMask, limit: 30)
+                        + (userStore?.lookupExact(pinyinKey: first, limit: 30) ?? [])
+                }
+                matches += fallbackEntries
                     .filter { $0.pinyin.split(separator: "'").count == 1 }
                     .map { ($0, first.count, 1) }
-                matches += fallback
             }
             let pathPenalty = Scale.fuzzyPenalty * fuzzyScale * Double(path.fuzzyMatches)
                 + Scale.typoPenalty * Double(path.typoCount)
@@ -217,7 +225,7 @@ public final class Engine: IMEEngine, @unchecked Sendable {
         limit: Int
     ) -> [Candidate] {
         let syllables = path.syllables
-        guard syllables.count > 1, syllables.count <= 16 else { return [] }
+        guard syllables.count > 1, syllables.count <= Scale.maxLatticeSyllables else { return [] }
         let isPartialSyllable: (String) -> Bool = { $0.count == 1 && !"aoe".contains($0) }
         let firstPartial = syllables.firstIndex(where: isPartialSyllable) ?? syllables.count
         guard firstPartial >= 2 else { return [] }

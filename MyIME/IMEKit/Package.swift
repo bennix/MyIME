@@ -12,6 +12,6 @@ let package = Package(
             dependencies: ["CSQLite"],
             resources: [.process("Resources")]
         ),
-        .testTarget(name: "IMEKitTests", dependencies: ["IMEKit"]),
+        .testTarget(name: "IMEKitTests", dependencies: ["IMEKit"], exclude: ["Fixtures"]),
     ]
 )

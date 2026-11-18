@@ -56,64 +56,86 @@ public struct Segmenter: Sendable {
         return combined.filter { !$0.syllables.isEmpty }.sorted(by: Self.precedes)
     }
 
+    /// Exact bounded k-best segmentation. Every ranking component (partial, typo, fuzzy,
+    /// syllable count) is additive, so prepending a token shifts all suffix parses equally and
+    /// the best `limit` parses of a suffix suffice to build the best `limit` of the whole
+    /// piece. This replaces an unordered DFS that stopped after `limit * 8` hits, which let
+    /// typo-corrected parses (shia→shai) displace complete clean ones.
     private func segmentPiece(_ text: String, fuzzy: FuzzyRules, limit: Int) -> [SegmentationPath] {
         let chars = Array(text)
-        var results: [SegmentationPath] = []
+        guard limit > 0 else { return [] }
+        // Suffix parse: syllables from `index` on; `end` is the absolute consumed length.
+        typealias Part = (syllables: [String], end: Int, fuzzy: Int, partial: Int, typo: Int)
+        var memo: [Int: [Part]] = [:]  // key = index * 2 + (typoAllowed ? 1 : 0)
 
-        func walk(_ index: Int, _ path: [String], _ fuzzyCount: Int, _ partialCount: Int, _ typoCount: Int) {
-            if results.count >= limit * 8 { return }
-            if index == chars.count {
-                results.append(SegmentationPath(
-                    syllables: path,
-                    consumedLength: index,
-                    fuzzyMatches: fuzzyCount,
-                    partialCount: partialCount,
-                    typoCount: typoCount
-                ))
-                return
+        func better(_ lhs: Part, _ rhs: Part) -> Bool {
+            if lhs.end != rhs.end { return lhs.end > rhs.end }
+            if lhs.partial != rhs.partial { return lhs.partial < rhs.partial }
+            if lhs.typo != rhs.typo { return lhs.typo < rhs.typo }
+            if lhs.fuzzy != rhs.fuzzy { return lhs.fuzzy < rhs.fuzzy }
+            if lhs.syllables.count != rhs.syllables.count { return lhs.syllables.count < rhs.syllables.count }
+            return lhs.syllables.joined(separator: "'") < rhs.syllables.joined(separator: "'")
+        }
+
+        func best(_ index: Int, typoAllowed: Bool) -> [Part] {
+            if index == chars.count { return [([], index, 0, 0, 0)] }
+            let key = index * 2 + (typoAllowed ? 1 : 0)
+            if let cached = memo[key] { return cached }
+            var candidates: [Part] = []
+            func extend(_ syllable: String, to end: Int, fuzzy fuzzyDelta: Int, partial: Int, typo: Int) {
+                for tail in best(end, typoAllowed: typoAllowed && typo == 0) {
+                    candidates.append(([syllable] + tail.syllables, tail.end,
+                                       tail.fuzzy + fuzzyDelta, tail.partial + partial, tail.typo + typo))
+                }
             }
             var found = false
             let maxEnd = min(chars.count, index + 6)
-            if index < maxEnd {
-                for end in stride(from: maxEnd, through: index + 1, by: -1) {
-                    let token = String(chars[index..<end])
-                    if syllables.contains(token) {
+            for end in stride(from: maxEnd, through: index + 1, by: -1) {
+                let token = String(chars[index..<end])
+                if syllables.contains(token) {
+                    found = true
+                    extend(token, to: end, fuzzy: 0, partial: 0, typo: 0)
+                } else if let normalized = normalizedFullForm(of: token) {
+                    found = true
+                    extend(normalized, to: end, fuzzy: 0, partial: 0, typo: 0)
+                } else if typoAllowed, end - index >= 3 {
+                    // Correct a single adjacent-letter transposition (hoa→hao, zhogn→zhong).
+                    for corrected in transposedVariants(of: token) {
                         found = true
-                        walk(end, path + [token], fuzzyCount, partialCount, typoCount)
-                    } else if let normalized = normalizedFullForm(of: token) {
-                        found = true
-                        walk(end, path + [normalized], fuzzyCount, partialCount, typoCount)
-                    } else if typoCount == 0, end - index >= 3 {
-                        // Correct a single adjacent-letter transposition (hoa→hao, zhogn→zhong).
-                        for corrected in transposedVariants(of: token) {
-                            found = true
-                            walk(end, path + [corrected], fuzzyCount, partialCount, typoCount + 1)
-                        }
+                        extend(corrected, to: end, fuzzy: 0, partial: 0, typo: 1)
                     }
-                    for equivalent in fuzzyEquivalents(of: token, rules: fuzzy) where syllables.contains(equivalent) {
-                        found = true
-                        walk(end, path + [equivalent], fuzzyCount + 1, partialCount, typoCount)
-                    }
+                }
+                for equivalent in fuzzyEquivalents(of: token, rules: fuzzy) where syllables.contains(equivalent) {
+                    found = true
+                    extend(equivalent, to: end, fuzzy: 1, partial: 0, typo: 0)
                 }
             }
             let initial = String(chars[index])
             if initials.contains(initial) {
                 found = true
-                walk(index + 1, path + [initial], fuzzyCount, partialCount + 1, typoCount)
+                extend(initial, to: index + 1, fuzzy: 0, partial: 1, typo: 0)
             }
-            if !found, !path.isEmpty {
-                results.append(SegmentationPath(
-                    syllables: path,
-                    consumedLength: index,
-                    fuzzyMatches: fuzzyCount,
-                    partialCount: partialCount + 1,
-                    typoCount: typoCount
-                ))
+            if !found, index > 0 {
+                // Dead end after at least one syllable: keep the truncated parse, flagged partial.
+                candidates.append(([], index, 0, 1, 0))
             }
+            candidates.sort(by: better)
+            var unique: [Part] = []
+            var seen = Set<[String]>()
+            for candidate in candidates where seen.insert(candidate.syllables).inserted {
+                unique.append(candidate)
+                if unique.count == limit { break }
+            }
+            memo[key] = unique
+            return unique
         }
 
-        walk(0, [], 0, 0, 0)
-        return Array(results.sorted(by: Self.precedes).prefix(limit))
+        return best(0, typoAllowed: true).compactMap { part in
+            part.syllables.isEmpty ? nil : SegmentationPath(
+                syllables: part.syllables, consumedLength: part.end, fuzzyMatches: part.fuzzy,
+                partialCount: part.partial, typoCount: part.typo
+            )
+        }
     }
 
     private func normalizedFullForm(of token: String) -> String? {

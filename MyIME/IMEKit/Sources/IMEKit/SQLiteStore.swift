@@ -49,6 +49,7 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
     private var predictions: [UInt64: [StoreEntry]] = [:]
     private var englishGlosses: [UInt64: String] = [:]
     private var exactLookupCache: [String: [StoreEntry]] = [:]
+    private var lookupCache: [String: [StoreEntry]] = [:]
     public let metadata: [String: String]
     public let traditionalConverter: TraditionalConverter
 
@@ -92,36 +93,49 @@ public final class SQLiteStore: CandidateLookup, @unchecked Sendable {
         }
     }
 
+    /// Ranking: exact py_key first, then abbreviation (initials) matches, then pinyin-prefix
+    /// completions; each tier ordered by weight DESC, word, id. The three tiers run as
+    /// separate index-friendly queries (the former single `OR GLOB` query forced SQLite to
+    /// build and sort a temp B-tree) and stop as soon as `limit` rows are collected.
     public func lookup(pinyinKey: String, initials: String, disabledSourceMask: Int, limit: Int) -> [StoreEntry] {
         lock.withLock {
-            guard let database else { return [] }
-            let sql = """
-            SELECT id, word, pinyin, weight FROM entries
-            WHERE (source_mask & ?1) != 0
-              AND (py_key = ?2 OR py_key GLOB ?3 OR initials = ?4)
-            ORDER BY CASE WHEN py_key = ?2 THEN 0 WHEN initials = ?4 THEN 1 ELSE 2 END,
-                     weight DESC, word ASC, id ASC
-            LIMIT ?5
-            """
-            var statement: OpaquePointer?
-            defer { sqlite3_finalize(statement) }
-            guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
-            sqlite3_bind_int64(statement, 1, Int64(~disabledSourceMask))
-            bind(pinyinKey, to: statement, index: 2)
-            bind(pinyinKey + "*", to: statement, index: 3)
-            bind(initials, to: statement, index: 4)
-            sqlite3_bind_int(statement, 5, Int32(limit))
+            guard let database, limit > 0 else { return [] }
+            let cacheKey = "\(disabledSourceMask)\u{0}\(limit)\u{0}\(pinyinKey)\u{0}\(initials)"
+            if let cached = lookupCache[cacheKey] { return cached }
+            let tiers = [
+                "py_key = ?2",
+                "py_key != ?2 AND initials = ?4",
+                "py_key != ?2 AND initials != ?4 AND py_key GLOB ?3",
+            ]
             var values: [StoreEntry] = []
-            while sqlite3_step(statement) == SQLITE_ROW {
-                guard let wordText = sqlite3_column_text(statement, 1),
-                      let pinyinText = sqlite3_column_text(statement, 2) else { continue }
-                values.append(StoreEntry(
-                    id: sqlite3_column_int64(statement, 0),
-                    word: String(cString: wordText),
-                    pinyin: String(cString: pinyinText),
-                    weight: Int(sqlite3_column_int(statement, 3))
-                ))
+            for condition in tiers where values.count < limit {
+                let sql = """
+                SELECT id, word, pinyin, weight FROM entries
+                WHERE (source_mask & ?1) != 0 AND \(condition)
+                ORDER BY weight DESC, word ASC, id ASC
+                LIMIT ?5
+                """
+                var statement: OpaquePointer?
+                defer { sqlite3_finalize(statement) }
+                guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { continue }
+                sqlite3_bind_int64(statement, 1, Int64(~disabledSourceMask))
+                bind(pinyinKey, to: statement, index: 2)
+                if condition.contains("GLOB") { bind(pinyinKey + "*", to: statement, index: 3) }
+                if condition.contains("initials") { bind(initials, to: statement, index: 4) }
+                sqlite3_bind_int(statement, 5, Int32(limit - values.count))
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    guard let wordText = sqlite3_column_text(statement, 1),
+                          let pinyinText = sqlite3_column_text(statement, 2) else { continue }
+                    values.append(StoreEntry(
+                        id: sqlite3_column_int64(statement, 0),
+                        word: String(cString: wordText),
+                        pinyin: String(cString: pinyinText),
+                        weight: Int(sqlite3_column_int(statement, 3))
+                    ))
+                }
             }
+            if lookupCache.count >= 512 { lookupCache.removeAll(keepingCapacity: true) }
+            lookupCache[cacheKey] = values
             return values
         }
     }
@@ -318,6 +332,14 @@ public final class UserStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "fudan.miniS.MyIME.user-store", qos: .utility)
     private let lock = NSLock()
     private var database: OpaquePointer?
+    /// In-memory snapshot of the three user tables, rebuilt lazily after any write so the
+    /// per-key hot path never touches SQLite. Always accessed under `lock`.
+    private struct Snapshot {
+        var phrases: [(rowid: Int64, word: String, pinyin: String, weight: Int, created: Int64, key: String, initials: String)] = []
+        var frequency: [String: (count: Int64, lastUsed: Int64)] = [:]
+        var bigrams: [String: Int] = [:]
+    }
+    private var snapshot: Snapshot?
 
     public init?(path: String) {
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
@@ -379,6 +401,7 @@ public final class UserStore: @unchecked Sendable {
                     sqlite3_finalize(statement)
                 }
                 sqlite3_exec(database, "COMMIT", nil, nil, nil)
+                self?.snapshot = nil
             }
         }
     }
@@ -400,46 +423,84 @@ public final class UserStore: @unchecked Sendable {
                 sqlite3_step(statement)
             }
             sqlite3_finalize(statement)
+            snapshot = nil
         }
     }
 
     public func lookup(pinyinKey: String, initials: String, limit: Int) -> [StoreEntry] {
         lock.withLock {
-            guard let database else { return [] }
+            guard let snapshot = loadSnapshot() else { return [] }
             let now = Int64(Date().timeIntervalSince1970)
-            let sql = """
-            SELECT rowid,word,pinyin,weight,created FROM user_phrase
-            ORDER BY min(65535,weight + CASE
-                WHEN ?1-created <= 300 THEN 32768
-                WHEN ?1-created <= 3600 THEN 16384
-                WHEN ?1-created <= 86400 THEN 4096
-                ELSE 0 END) DESC,word ASC,rowid ASC LIMIT 500
-            """
-            var statement: OpaquePointer?
-            defer { sqlite3_finalize(statement) }
-            guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
-            sqlite3_bind_int64(statement, 1, now)
+            func effectiveWeight(_ row: (weight: Int, created: Int64)) -> Int {
+                let age = now - row.created
+                let bonus = age <= 300 ? 32_768 : age <= 3_600 ? 16_384 : age <= 86_400 ? 4_096 : 0
+                return min(65_535, row.weight + bonus)
+            }
+            // Same ordering and 500-row window as the former SQL query: effective weight
+            // (stored weight + recency bonus) desc, word asc, rowid asc.
+            let ranked = snapshot.phrases
+                .map { ($0, effectiveWeight(($0.weight, $0.created))) }
+                .sorted {
+                    if $0.1 != $1.1 { return $0.1 > $1.1 }
+                    if $0.0.word != $1.0.word { return $0.0.word < $1.0.word }
+                    return $0.0.rowid < $1.0.rowid
+                }
+                .prefix(500)
             var entries: [StoreEntry] = []
+            for (row, weight) in ranked {
+                guard row.key.hasPrefix(pinyinKey) || row.initials == initials else { continue }
+                entries.append(StoreEntry(id: -row.rowid, word: row.word, pinyin: row.pinyin, weight: weight))
+                if entries.count == limit { break }
+            }
+            return entries
+        }
+    }
+
+    /// Loads (or returns) the snapshot. Caller must hold `lock`.
+    private func loadSnapshot() -> Snapshot? {
+        if let snapshot { return snapshot }
+        guard let database else { return nil }
+        var result = Snapshot()
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(database, "SELECT rowid,word,pinyin,weight,created FROM user_phrase", -1, &statement, nil) == SQLITE_OK {
             while sqlite3_step(statement) == SQLITE_ROW,
                   let word = sqlite3_column_text(statement, 1),
                   let pinyin = sqlite3_column_text(statement, 2) {
                 let pinyinValue = String(cString: pinyin)
                 let parts = pinyinValue.split(separator: "'")
-                let key = parts.joined()
-                let entryInitials = parts.compactMap(\.first).map(String.init).joined()
-                guard key.hasPrefix(pinyinKey) || entryInitials == initials else { continue }
-                let age = max(0, Double(now - sqlite3_column_int64(statement, 4)))
-                let recencyBonus = age <= 300 ? 32_768 : age <= 3_600 ? 16_384 : age <= 86_400 ? 4_096 : 0
-                entries.append(StoreEntry(
-                    id: -sqlite3_column_int64(statement, 0),
+                result.phrases.append((
+                    rowid: sqlite3_column_int64(statement, 0),
                     word: String(cString: word),
                     pinyin: pinyinValue,
-                    weight: min(65_535, Int(sqlite3_column_int(statement, 3)) + recencyBonus)
+                    weight: Int(sqlite3_column_int(statement, 3)),
+                    created: sqlite3_column_int64(statement, 4),
+                    key: parts.joined(),
+                    initials: parts.compactMap(\.first).map(String.init).joined()
                 ))
-                if entries.count == limit { break }
             }
-            return entries
         }
+        sqlite3_finalize(statement)
+        statement = nil
+        if sqlite3_prepare_v2(database, "SELECT word,pinyin,count,last_used FROM user_freq", -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let word = sqlite3_column_text(statement, 0),
+                  let pinyin = sqlite3_column_text(statement, 1) {
+                result.frequency[String(cString: word) + "\u{0}" + String(cString: pinyin)] =
+                    (sqlite3_column_int64(statement, 2), sqlite3_column_int64(statement, 3))
+            }
+        }
+        sqlite3_finalize(statement)
+        statement = nil
+        if sqlite3_prepare_v2(database, "SELECT prev,word,count FROM bigram", -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let previous = sqlite3_column_text(statement, 0),
+                  let word = sqlite3_column_text(statement, 1) {
+                result.bigrams[String(cString: previous) + "\u{0}" + String(cString: word)] = Int(sqlite3_column_int(statement, 2))
+            }
+        }
+        sqlite3_finalize(statement)
+        snapshot = result
+        return result
     }
 
     public func lookupExact(pinyinKey: String, limit: Int) -> [StoreEntry] {
@@ -448,18 +509,16 @@ public final class UserStore: @unchecked Sendable {
     }
 
     public func boost(word: String, pinyin: String) -> Double {
-        guard let values = integerRow(
-            sql: "SELECT count,last_used FROM user_freq WHERE word=?1 AND pinyin=?2",
-            values: [word, pinyin]
-        ) else { return 0 }
-        let age = max(0, Date().timeIntervalSince1970 - Double(values[1]))
+        let row = lock.withLock { loadSnapshot()?.frequency[word + "\u{0}" + pinyin] }
+        guard let row else { return 0 }
+        let age = max(0, Date().timeIntervalSince1970 - Double(row.lastUsed))
         let recency = age <= 300 ? 0.25 : age <= 3_600 ? 0.12 : age <= 86_400 ? 0.05 : 0
-        return log1p(Double(values[0])) / 10.0 + recency
+        return log1p(Double(row.count)) / 10.0 + recency
     }
 
     public func bigram(previous: String?, word: String) -> Double {
         guard let previous else { return 0 }
-        return scalar(sql: "SELECT count FROM bigram WHERE prev=?1 AND word=?2", values: [previous, word])
+        return lock.withLock { loadSnapshot()?.bigrams[previous + "\u{0}" + word] }
             .map { min(4, log1p(Double($0))) } ?? 0
     }
 
@@ -532,6 +591,7 @@ public final class UserStore: @unchecked Sendable {
                 sqlite3_finalize(statement)
             }
             sqlite3_exec(database, "COMMIT", nil, nil, nil)
+            snapshot = nil
         }
         return (accepted.count, rejected)
     }
@@ -558,6 +618,7 @@ public final class UserStore: @unchecked Sendable {
             self?.lock.withLock {
                 guard let database = self?.database else { return }
                 sqlite3_exec(database, "DELETE FROM user_freq; DELETE FROM bigram;", nil, nil, nil)
+                self?.snapshot = nil
             }
         }
     }
