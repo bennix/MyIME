@@ -18,9 +18,9 @@ MyIME 的 \code{SegmentationPath} 还记录消费长度、模糊匹配数、简�
 
 \section{搜索与限制}
 
-完整枚举可能指数增长。教学版可以用深度优先搜索理解所有路径，工程版必须限制：单音节最大长度、每个输入返回路径数、搜索中间结果数和总耗时。MyIME 对每个片段递归尝试最长到最短的 token，并在结果过多时提前停止。
+完整枚举可能指数增长。教学版可以用深度优先搜索理解所有路径，工程版必须限制：单音节最大长度、每个输入返回路径数、搜索中间结果数和总耗时。以输入位置和剩余错拼机会为状态，MyIME 缓存每个后缀的切分结果。不同前缀抵达同一状态即可复用结果。每个状态先按消费长度和容错代价排序，再去重并保留限定条数，避免先枚举到的短路径挤掉完整路径。
 
-\lstinputlisting[language=Swift,firstline=31,lastline=116,caption={切分主流程与受限递归搜索}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
+\lstinputlisting[language=Swift,firstline=32,lastline=139,caption={切分主流程与受限递归搜索}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
 
 如果某条路径只消费了前缀，它可以用于“用户还在输入”的候选，但绝不能压过完整消费路径。因此路径排序首先比较 \code{consumedLength}，再比较简拼、错拼、模糊音和音节数。
 
@@ -41,7 +41,7 @@ C(P)=a(n-\ell_P)+bN_{\mathrm{partial}}+cN_{\mathrm{typo}}+dN_{\mathrm{fuzzy}},
   \item 用邻接表写出 \code{xian} 的切分图。
   \item 为什么“总是取最长音节”不能正确处理所有中文拼音？
   \item 给出一个输入，使路径数量迅速增加，并提出两个剪枝办法。
-  \item 将递归搜索改写为动态规划，比较两种实现的可读性。
+  \item 对比穷举与记忆化搜索在相同输入上的状态访问次数；解释为何缓存键必须区分是否还允许一次错拼。
 \end{enumerate}
 
 \begin{summarybox}
@@ -63,19 +63,19 @@ C(P)=a(n-\ell_P)+bN_{\mathrm{partial}}+cN_{\mathrm{typo}}+dN_{\mathrm{fuzzy}},
 
 纯简拼查询通常需要专门的首字母索引。MyIME 只在路径中的每个音节都是单字母时生成 initials 查询键，防止完整拼音 \code{xiexie} 被错误拿去匹配首字母 \code{xx} 的“学习”等词。
 
-\lstinputlisting[language=Swift,firstline=36,lastline=75,caption={完整拼音与纯简拼查询的区分}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+\lstinputlisting[language=Swift,firstline=37,lastline=64,caption={完整拼音与纯简拼查询的区分}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
 
 \section{模糊音是可配置关系}
 
 模糊音可以表示为一组双向替换关系，例如 \(z\leftrightarrow zh\)、\(n\leftrightarrow l\)、\(an\leftrightarrow ang\)。不同用户需要的规则不同，因此默认全部关闭，并把命中次数写入路径。
 
-\lstinputlisting[language=Swift,firstline=137,lastline=171,caption={模糊音等价集合的生成}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
+\lstinputlisting[language=Swift,firstline=161,lastline=180,caption={模糊音等价集合的生成}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
 
 \section{相邻字母颠倒}
 
 用户可能把 \code{hao} 输入为 \code{hoa}，把 \code{zhong} 输入为 \code{zhogn}。MyIME 枚举 token 中相邻字符的一次交换，只接受交换后成为合法音节的结果，并限制整条路径最多使用一次错拼修正。若无限允许交换，搜索空间和误召回都会失控。
 
-\lstinputlisting[language=Swift,firstline=118,lastline=136,caption={一次相邻字符颠倒修正}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
+\lstinputlisting[language=Swift,firstline=149,lastline=159,caption={一次相邻字符颠倒修正}]{../../MyIME/IMEKit/Sources/IMEKit/Segmenter.swift}
 
 设精确候选基础分为 \(S_0\)，一种简单容错分数为
 
@@ -123,9 +123,11 @@ S=S_0-\lambda_fN_f-\lambda_pN_p-\lambda_tN_t,
   \item 根据音节区间查询词格边。
 \end{itemize}
 
+在配套版本中，系统词库按完整拼音键、首字母键、拼音前缀分三层召回。每层排除前层已覆盖的行，按权重、词面和行标识稳定排序；候选数量达到上限即跳过余下查询。可用 LookupEquivalenceTests 对照旧查询，检查结果及顺序。
+
 索引应围绕这些访问路径，而不是“所有列都建索引”。前缀查询只有在模式与排序规则允许使用 B-tree 时才会命中索引；课堂实验应使用 \code{EXPLAIN QUERY PLAN} 验证，而不是凭直觉。
 
-\lstinputlisting[language=Swift,firstline=41,lastline=128,caption={SQLiteStore 的打开、语句准备与查询入口}]{../../MyIME/IMEKit/Sources/IMEKit/SQLiteStore.swift}
+\lstinputlisting[language=Swift,firstline=43,lastline=141,caption={SQLiteStore 的打开、语句准备与查询入口}]{../../MyIME/IMEKit/Sources/IMEKit/SQLiteStore.swift}
 
 \section{只读与完整性}
 
@@ -135,7 +137,7 @@ S=S_0-\lambda_fN_f-\lambda_pN_p-\lambda_tN_t,
 
 用户选择候选后更新词频、最近使用时间和上下文关系。写入不能阻塞每次按键的主路径。可以使用串行队列异步写入，同时提供测试用的 \code{waitForPendingWrites()} 以建立确定的断言。
 
-\lstinputlisting[language=Swift,firstline=294,lastline=388,caption={UserStore 的本地持久化结构}]{../../MyIME/IMEKit/Sources/IMEKit/SQLiteStore.swift}
+\lstinputlisting[language=Swift,firstline=331,lastline=407,caption={UserStore 的本地持久化结构}]{../../MyIME/IMEKit/Sources/IMEKit/SQLiteStore.swift}
 
 \begin{warningbox}[数据库失败必须静默降级]
 用户库损坏、目录只读或磁盘空间不足时，学习可以停止，但基本输入不能停止。系统词库损坏时也要避免在每次按键重复执行昂贵的失败操作。
@@ -213,7 +215,7 @@ S(c)=&\;\alpha F(c)+\beta U(c)+\gamma C(c,h)\\
 
 \figmp{6}{候选总分由奖励项和惩罚项共同组成}
 
-\lstinputlisting[language=Swift,firstline=75,lastline=130,caption={单词候选的召回、加权、去重与稳定排序}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+\lstinputlisting[language=Swift,firstline=65,lastline=150,caption={单词候选的召回、加权、去重与稳定排序}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
 
 \section{长度偏差}
 
@@ -276,7 +278,7 @@ S(c)=&\;\alpha F(c)+\beta U(c)+\gamma C(c,h)\\
 
 一个假设至少包含已生成文本、累计分数、词数和最后一个词。最后一个词用于计算下一条边的 bigram 转移。比较器依次看得分、词数和文本，保持确定性。
 
-\lstinputlisting[language=Swift,firstline=180,lastline=230,caption={词格假设与句子组合入口}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+\lstinputlisting[language=Swift,firstline=203,lastline=237,caption={词格假设与句子组合入口}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
 
 \section{转移分数}
 
@@ -288,7 +290,7 @@ S_{\mathrm{new}}=S_{\mathrm{old}}+F(v)-\lambda_{\mathrm{word}}+B(u,v)+T(u,v)+U(v
 
 其中 \(B\) 是系统 bigram，\(T\) 是字符序列证据，\(U\) 是用户偏好。若尾部只有简拼，查询可以允许前缀补全，但必须扣除额外音节成本。
 
-\lstinputlisting[language=Swift,firstline=230,lastline=321,caption={词格扩展、Beam 剪枝与句子候选生成}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+\lstinputlisting[language=Swift,firstline=238,lastline=342,caption={词格扩展、Beam 剪枝与句子候选生成}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
 
 \section{时间预算}
 
@@ -341,7 +343,7 @@ U(w)=\log(1+c_w)\exp\left(-\frac{t-t_w}{\tau}\right).
 
 这里 \(c_w\) 是选择次数，\(t_w\) 是最近使用时间，\(\tau\) 控制遗忘速度。
 
-\lstinputlisting[language=Swift,firstline=321,lastline=430,caption={续写候选、选择结果和提交学习}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
+\lstinputlisting[language=Swift,firstline=344,lastline=431,caption={续写候选、选择结果和提交学习}]{../../MyIME/IMEKit/Sources/IMEKit/Engine.swift}
 
 \section{近期组词的边界}
 

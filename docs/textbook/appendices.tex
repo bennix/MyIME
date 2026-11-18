@@ -305,7 +305,7 @@ codesign -dv --verbose=4 MyIME.app
 spctl --assess --type execute --verbose=4 MyIME.app
 lipo -info MyIME.app/Contents/MacOS/MyIME
 xcrun stapler validate MyIME.app
-shasum -a 256 MyIME-1.0.10.dmg
+shasum -a 256 -c MyIME-1.0.14.dmg.sha256
 \end{lstlisting}
 
 \section{发布前人工清单}
