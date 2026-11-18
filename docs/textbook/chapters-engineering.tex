@@ -358,6 +358,16 @@ MyIME 的脚本按顺序运行引擎测试、词库验证、构建、架构检�
 
 \lstinputlisting[language=bash,firstline=1,lastline=220,caption={正式发布脚本的环境检查与主要门禁}]{../../tools/build-release.sh}
 
+\section{复核本版发布物}
+在发布页选择标签 \code{v1.0.14-universal}，下载同页的 DMG、校验文件和公证回执。旧标签 \code{v1.0.14} 的安装镜像仅含 Apple Silicon 架构。两个镜像的应用版本号相同，可通过发布标签、文件摘要和实际架构区分。
+
+在下载目录执行以下命令。第一行核对装订后的最终镜像，第二行验证票据，第三行检查 Gatekeeper 对磁盘镜像的评估。挂载后再用上一节的架构检查方法核对应用主程序。
+\begin{lstlisting}[language=bash]
+shasum -a 256 -c MyIME-1.0.14.dmg.sha256
+xcrun stapler validate MyIME-1.0.14.dmg
+spctl -a -vv -t open --context context:primary-signature MyIME-1.0.14.dmg
+\end{lstlisting}
+
 \section{凭据管理}
 
 公证凭据应存入钥匙串 profile，而不是写进脚本或提交到仓库。应用专用密码一旦出现在截图或聊天记录中，应立即撤销并重新生成。课堂作业不要求学生共享教师证书；每组可生成 ad-hoc 演示包，正式公开发布由项目维护者在受控机器执行。
