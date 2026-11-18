@@ -379,4 +379,29 @@ private struct PredictingStore: CandidateLookup {
         #expect(paths.first?.syllables == ["xi", "an"])
     }
     @Test func incompleteTail() { #expect(Segmenter().segment("nihaov").first?.consumedLength == 5) }
+
+    /// Typo-corrected parses (shia→shai, xina→xian) used to fill the pre-sort DFS cap
+    /// and push the clean parse out of the returned list.
+    @Test(arguments: [
+        ("mianshianpaizaizhousanxiawu", ["mian", "shi", "an", "pai", "zai", "zhou", "san", "xia", "wu"]),
+        ("chongxinanzhuangcaozuoxitong", ["chong", "xin", "an", "zhuang", "cao", "zuo", "xi", "tong"]),
+    ])
+    func cleanParseSurvivesTypoVariants(input: String, expected: [String]) {
+        let paths = Segmenter().segment(input, limit: 4)
+        // Equal-cost alternatives (xi'nan vs xin'an) may tie; the clean parse only has to
+        // be present, and no typo-corrected parse may outrank it.
+        #expect(paths.contains { $0.syllables == expected && $0.typoCount == 0 })
+        #expect(paths.first?.typoCount == 0)
+    }
+
+    @Test func typoIsStillCorrectedAtMostOnce() {
+        #expect(Segmenter().segment("nihoa").first?.syllables == ["ni", "hao"])
+        #expect(Segmenter().segment("nihoa").first?.typoCount == 1)
+        #expect(Segmenter().segment("hoazhogn").allSatisfy { $0.typoCount <= 1 })
+    }
+
+    @Test func apostropheAndPartialArePreserved() {
+        #expect(Segmenter().segment("xi'an").first?.syllables == ["xi", "an"])
+        #expect(Segmenter().segment("woxiangch").first?.syllables == ["wo", "xiang", "c", "h"])
+    }
 }
